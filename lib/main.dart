@@ -542,10 +542,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   'fee': _num(feeC.text),
                   'kill': _num(killC.text),
                   'win': _num(winC.text),
-                  'slots': 100,
-                  'joined': 0,
-                  'rId': '15 min before match',
-                  'rPass': '****',
+                  'slots': mapC.text.trim().toLowerCase().contains('livik') ? 52 : 100,
+                              'joined': 0,
+            'rId': '15 min before match',
+            'rPass': '****',
+            
+                  
                 }),
               );
               _msg('Match Live!');
