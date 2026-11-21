@@ -1034,8 +1034,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             )),
               
-    ];
-
+    ]),
+]; 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
