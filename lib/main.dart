@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 
 const String kApiKey = 'AIzaSyDdXPfU6_RkgFXyq58nUeEFIQI3JI_nVf0';
 const String kDbUrl = 'https://sk-esports-live-default-rtdb.asia-southeast1.firebasedatabase.app';
@@ -331,7 +333,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (ctx) => AlertDialog(
         title: Text('Join ${m['title']}', style: const TextStyle(fontSize: 15)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Rule: Minimum BGMI Level 40+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+          const Text('Rule: Minimum BGMI Level 30+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
           const SizedBox(height: 8),
           TextField(controller: ignC, decoration: const InputDecoration(labelText: 'BGMI Name (IGN)', border: OutlineInputBorder())),
           const SizedBox(height: 8),
@@ -772,14 +774,18 @@ class _HomeScreenState extends State<HomeScreen> {
         const Card(
           child: Padding(
             padding: EdgeInsets.all(14),
-            child: Text('RULES:\n• BGMI Level 40+ ID required.\n• Room ID & Pass 15 min pehle milega.'),
+            child: Text('RULES:\n• BGMI Level 30+ ID required.\n• Room ID & Pass 15 min pehle milega.'),
           ),
         ),
         ElevatedButton(
-          onPressed: () {
-            Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL'));
-            _msg('Telegram Copied!');
-          },
+                                onPressed: () async {
+                        final url = Uri.parse('https://t.me/SK_ESPORTSOFFICIAL');
+                        if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+                          Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL'));
+                          _msg('Telegram Copied!');
+                        }
+                      },
+
           child: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)'),
         ),
                 OutlinedButton(
