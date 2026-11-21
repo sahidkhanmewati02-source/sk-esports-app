@@ -2,14 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
-// ==========================================
-// APNI FIREBASE DETAILS YAHAN PASTE KAREIN
-// ==========================================
 const String kApiKey = 'AIzaSyDdXPfU6_RkgFXyq58nUeEFIQI3JI_nVf0';
 const String kDbUrl = 'https://sk-esports-live-default-rtdb.asia-southeast1.firebasedatabase.app';
 const String kAdmin = 'sahidkhanmewati02@gmail.com';
-// ==========================================
 
 void main() => runApp(MaterialApp(
       title: 'SK ESPORTS',
@@ -31,7 +28,38 @@ class _AuthScreenState extends State<AuthScreen> {
   final _name = TextEditingController(),
       _email = TextEditingController(),
       _pass = TextEditingController();
-  bool _isLogin = true, _showPass = false, _loading = false;
+  bool _isLogin = true, _showPass = false, _loading = false, _checking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoLogin();
+  }
+
+  Future _autoLogin() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final rt = sp.getString('rt'), email = sp.getString('email');
+      if (rt != null && email != null) {
+        final res = await http.post(
+          Uri.parse('https://securetoken.googleapis.com/v1/token?key=$kApiKey'),
+          body: {'grant_type': 'refresh_token', 'refresh_token': rt},
+        );
+        final d = jsonDecode(res.body);
+        if (res.statusCode == 200 && mounted) {
+          await sp.setString('rt', d['refresh_token']);
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => HomeScreen(uid: d['user_id'], token: d['id_token'], email: email),
+            ),
+          );
+          return;
+        }
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _checking = false);
+  }
 
   void _msg(String s) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
@@ -57,6 +85,10 @@ class _AuthScreenState extends State<AuthScreen> {
         throw Exception(data['error']?['message'] ?? 'Auth Failed');
       }
       final String uid = data['localId'], token = data['idToken'];
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('rt', data['refreshToken']);
+      await sp.setString('email', e);
+
       if (!_isLogin) {
         await http.put(
           Uri.parse('$kDbUrl/users/$uid.json?auth=$token'),
@@ -84,6 +116,9 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFFFF9800))));
+    }
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -671,10 +706,15 @@ class _HomeScreenState extends State<HomeScreen> {
           },
           child: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)'),
         ),
-        OutlinedButton(
-          onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen())),
+                OutlinedButton(
+          onPressed: () async {
+            await (await SharedPreferences.getInstance()).clear();
+            if (!context.mounted) return;
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
+          },
           child: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
         ),
+            
       ]),
       if (isAdmin)
         ListView(padding: const EdgeInsets.all(14), children: [
