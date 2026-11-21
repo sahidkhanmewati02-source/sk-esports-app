@@ -29,19 +29,21 @@ class SKEsportsApp extends StatelessWidget {
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
   @override
-  State<AuthScreen> createState() => _AuthScreenState();
+  State createState() => _AuthScreenState();
 }
 
-class _AuthScreenState extends State<AuthScreen> {
+class _AuthScreenState extends State {
   bool _isLogin = true, _loading = false;
   final _email = TextEditingController(), _pass = TextEditingController(), _ign = TextEditingController(), _id = TextEditingController();
 
   void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
 
-  Future<void> _submit() async {
+  Future _submit() async {
     final e = _email.text.trim(), p = _pass.text.trim();
-    if (!e.contains('@') || p.length < 6) return _msg('Sahi Email aur 6+ digit Password dalein!');
-    if (!_isLogin && (_ign.text.trim().isEmpty || _id.text.trim().length < 8)) return _msg('Sahi BGMI IGN aur ID dalein!');
+    if (!e.contains('@') || !RegExp(r'^.{6,}$').hasMatch(p)) return _msg('Sahi Email aur 6+ digit Password dalein!');
+    if (!_isLogin && (_ign.text.trim().isEmpty || !RegExp(r'^\d{8,}$').hasMatch(_id.text.trim()))) {
+      return _msg('Sahi BGMI IGN aur 8+ digit BGMI ID dalein!');
+    }
     setState(() => _loading = true);
     try {
       final ep = _isLogin ? 'accounts:signInWithPassword' : 'accounts:signUp';
@@ -118,10 +120,11 @@ class HomeScreen extends StatefulWidget {
   final String uid, token, email;
   const HomeScreen({super.key, required this.uid, required this.token, required this.email});
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State {
+  HomeScreen get w => widget as HomeScreen;
   int _tab = 0, _wallet = 0;
   String _ign = 'Player', _bgmiId = '0000000000';
   bool _loading = true;
@@ -141,10 +144,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
 
-  Future<void> _sync() async {
+  Future _sync() async {
     setState(() => _loading = true);
     try {
-      final uRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
+      final uRes = await http.get(Uri.parse('$kDbUrl/users/${w.uid}.json?auth=${w.token}'));
       if (uRes.statusCode == 200 && uRes.body != 'null') {
         final d = jsonDecode(uRes.body);
         _ign = d['ign'] ?? 'SK_Player';
@@ -152,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _wallet = int.tryParse(d['wallet'].toString()) ?? 0;
         if (d['txns'] is Map) _txns = (d['txns'] as Map).values.toList().reversed.toList();
       }
-      final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'));
+      final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${w.token}'));
       if (mRes.statusCode == 200 && mRes.body != 'null') {
         final mMap = jsonDecode(mRes.body);
         for (final m in _matches) {
@@ -160,7 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
             m.joined = mMap[m.id]['joined'] ?? m.joined;
             m.rId = mMap[m.id]['rId'] ?? m.rId;
             m.rPass = mMap[m.id]['rPass'] ?? m.rPass;
-            if (mMap[m.id]['players'] is Map && (mMap[m.id]['players'] as Map).containsKey(widget.uid)) m.isJoined = true;
+            if (mMap[m.id]['players'] is Map && (mMap[m.id]['players'] as Map).containsKey(w.uid)) m.isJoined = true;
           }
         }
       }
@@ -168,11 +171,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
-  Future<void> _saveTxn(String title, String sub, int amt, bool credit, String status) async {
+  Future _saveTxn(String title, String sub, int amt, bool credit, String status) async {
     final t = {'title': title, 'sub': sub, 'amt': amt, 'credit': credit, 'status': status};
     setState(() => _txns.insert(0, t));
-    await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': _wallet, 'ign': _ign, 'bgmiId': _bgmiId}));
-    await http.post(Uri.parse('$kDbUrl/users/${widget.uid}/txns.json?auth=${widget.token}'), body: jsonEncode(t));
+    await http.patch(Uri.parse('$kDbUrl/users/${w.uid}.json?auth=${w.token}'), body: jsonEncode({'wallet': _wallet, 'ign': _ign, 'bgmiId': _bgmiId}));
+    await http.post(Uri.parse('$kDbUrl/users/${w.uid}/txns.json?auth=${w.token}'), body: jsonEncode(t));
   }
 
   void _join(dynamic m) {
@@ -193,12 +196,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () async {
-              if (_wallet < m.fee) { Navigator.pop(ctx); setState(() => _tab = 1); return _msg('Balance kam hai!'); }
-              setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet -= m.fee; m.joined++; m.isJoined = true; });
+              final int fee = m.fee;
+              if ((_wallet - fee).isNegative) { Navigator.pop(ctx); setState(() => _tab = 1); return _msg('Balance kam hai!'); }
+              setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = _wallet - fee; m.joined++; m.isJoined = true; });
               Navigator.pop(ctx);
-              await _saveTxn('Joined: ${m.title}', 'IGN: $_ign', m.fee, false, 'PAID');
-              await http.patch(Uri.parse('$kDbUrl/matches/${m.id}.json?auth=${widget.token}'), body: jsonEncode({'joined': m.joined}));
-              await http.put(Uri.parse('$kDbUrl/matches/${m.id}/players/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': _ign, 'bgmiId': _bgmiId}));
+              await _saveTxn('Joined: ${m.title}', 'IGN: $_ign', fee, false, 'PAID');
+              await http.patch(Uri.parse('$kDbUrl/matches/${m.id}.json?auth=${w.token}'), body: jsonEncode({'joined': m.joined}));
+              await http.put(Uri.parse('$kDbUrl/matches/${m.id}/players/${w.uid}.json?auth=${w.token}'), body: jsonEncode({'ign': _ign, 'bgmiId': _bgmiId}));
               _msg('Slot Confirmed!');
             },
             child: Text('Pay ₹${m.fee}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -226,11 +230,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
               onPressed: () async {
-                if (utrC.text.trim().length < 6) return _msg('Sahi UTR dalein!');
-                setState(() => _wallet += amt);
+                if (!RegExp(r'^\d{6,}$').hasMatch(utrC.text.trim())) return _msg('Sahi UTR dalein!');
+                setState(() => _wallet = _wallet + amt);
                 Navigator.pop(ctx);
                 await _saveTxn('UPI Deposit', 'UTR: ${utrC.text.trim()}', amt, true, 'SUBMITTED');
-                await http.post(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'), body: jsonEncode({'uid': widget.uid, 'ign': _ign, 'amt': amt, 'utr': utrC.text.trim()}));
+                await http.post(Uri.parse('$kDbUrl/deposits.json?auth=${w.token}'), body: jsonEncode({'uid': w.uid, 'ign': _ign, 'amt': amt, 'utr': utrC.text.trim()}));
                 _msg('₹$amt Added!');
               },
               child: const Text('Add', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -259,7 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () async {
               setState(() { m.rId = idC.text.trim(); m.rPass = passC.text.trim(); });
               Navigator.pop(ctx);
-              await http.patch(Uri.parse('$kDbUrl/matches/${m.id}.json?auth=${widget.token}'), body: jsonEncode({'rId': m.rId, 'rPass': m.rPass}));
+              await http.patch(Uri.parse('$kDbUrl/matches/${m.id}.json?auth=${w.token}'), body: jsonEncode({'rId': m.rId, 'rPass': m.rPass}));
               _msg('Live Room Updated!');
             },
             child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -271,7 +275,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin = widget.email.toLowerCase() == kAdmin.toLowerCase();
+    final isAdmin = w.email.toLowerCase() == kAdmin.toLowerCase();
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
@@ -325,7 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ]),
         ),
         ListView(padding: const EdgeInsets.all(16), children: [
-          Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
+          Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${w.email}'))),
           const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('RULES:\n• BGMI Level 40+ required.\n• Room ID & Pass 15 min pehle milega.'))),
           ElevatedButton(onPressed: () { Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL')); _msg('Telegram Link Copied!'); }, child: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)')),
           OutlinedButton(onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen())), child: const Text('Logout', style: TextStyle(color: Colors.redAccent))),
