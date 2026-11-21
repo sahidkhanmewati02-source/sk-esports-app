@@ -1,144 +1,346 @@
-  Widget _matchesTab() {
-    final isAdmin = widget.email.toLowerCase() == kAdmin.toLowerCase();
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: _matches.length,
-      itemBuilder: (_, i) {
-        final m = _matches[i], left = m.slots - m.joined;
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: m.isJoined ? const Color(0xFF00E676) : Colors.transparent)),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Expanded(child: Text(m.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: const Color(0x33FF9800), borderRadius: BorderRadius.circular(6)),
-                  child: Text('${m.map} • ${m.mode}', style: const TextStyle(color: Color(0xFFFF9800), fontSize: 11)),
-                ),
-              ]),
-              const SizedBox(height: 4),
-              Text('Time: ${m.time}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-              const Divider(height: 16),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                _stat('ENTRY', '₹${m.fee}', Colors.white),
-                _stat('PER KILL', '₹${m.kill}', const Color(0xFF00E676)),
-                _stat('WINNER', '₹${m.win}', const Color(0xFFFF9800)),
-              ]),
-              if (m.isJoined || isAdmin) ...[
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+
+const kApiKey = 'AIzaSyDdXPfU6_RkgFXyq58nUeEFIQI3JI_nVf0';
+const kDbUrl = 'https://sk-esports-live-default-rtdb.asia-southeast1.firebasedatabase.app';
+const kAdmin = 'sahidkhanmewati02@gmail.com';
+
+void main() => runApp(const SKEsportsApp());
+
+class SKEsportsApp extends StatelessWidget {
+  const SKEsportsApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'SK ESPORTS',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
+        cardColor: const Color(0xFF161B22),
+        colorScheme: const ColorScheme.dark(primary: Color(0xFFFF9800), secondary: Color(0xFF00E676)),
+      ),
+      home: const AuthScreen(),
+    );
+  }
+}
+
+class AuthScreen extends StatefulWidget {
+  const AuthScreen({super.key});
+  @override
+  State<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends State<AuthScreen> {
+  bool _isLogin = true, _loading = false;
+  final _email = TextEditingController(), _pass = TextEditingController(), _ign = TextEditingController(), _id = TextEditingController();
+
+  void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+
+  Future<void> _submit() async {
+    final e = _email.text.trim(), p = _pass.text.trim();
+    if (!e.contains('@') || p.length < 6) return _msg('Sahi Email aur 6+ digit Password dalein!');
+    if (!_isLogin && (_ign.text.trim().isEmpty || _id.text.trim().length < 8)) return _msg('Sahi BGMI IGN aur ID dalein!');
+    setState(() => _loading = true);
+    try {
+      final ep = _isLogin ? 'accounts:signInWithPassword' : 'accounts:signUp';
+      final res = await http.post(
+        Uri.parse('https://identitytoolkit.googleapis.com/v1/$ep?key=$kApiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': e, 'password': p, 'returnSecureToken': true}),
+      );
+      final data = jsonDecode(res.body);
+      if (res.statusCode != 200) throw Exception(data['error']?['message'] ?? 'Auth Failed');
+      final String uid = data['localId'], token = data['idToken'];
+      if (!_isLogin) {
+        await http.put(Uri.parse('$kDbUrl/users/$uid.json?auth=$token'),
+            body: jsonEncode({'email': e, 'ign': _ign.text.trim(), 'bgmiId': _id.text.trim(), 'wallet': 0}));
+      }
+      if (!mounted) return;
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomeScreen(uid: uid, token: token, email: e)));
+    } catch (err) {
+      _msg(err.toString().replaceAll('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.sports_esports, size: 52, color: Color(0xFFFF9800)),
+                const Text('SK ESPORTS', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                Text(_isLogin ? 'Player Login' : 'Create Account', style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 14),
+                if (!_isLogin) ...[
+                  TextField(controller: _ign, decoration: const InputDecoration(labelText: 'BGMI Name (IGN)', border: OutlineInputBorder())),
+                  const SizedBox(height: 10),
+                  TextField(controller: _id, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID (Level 40+)', border: OutlineInputBorder())),
+                  const SizedBox(height: 10),
+                ],
+                TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
                 const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: const Color(0x1A00E676), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFF00E676))),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text('Room: ${m.rId} | Pass: ${m.rPass}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 12)),
-                    Row(children: [
-                      if (isAdmin) IconButton(icon: const Icon(Icons.edit, size: 16, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
-                      InkWell(onTap: () { Clipboard.setData(ClipboardData(text: m.rId)); _msg('Copied!'); }, child: const Icon(Icons.copy, size: 16, color: Color(0xFF00E676))),
-                    ]),
-                  ]),
-                ),
-              ],
-              const SizedBox(height: 10),
-              LinearProgressIndicator(value: m.joined / m.slots, backgroundColor: Colors.grey[800], color: m.isJoined ? const Color(0xFF00E676) : const Color(0xFFFF9800)),
-              const SizedBox(height: 8),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('${m.joined}/${m.slots} Joined ($left left)', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                TextField(controller: _pass, obscureText: true, decoration: const InputDecoration(labelText: 'Password (6+ chars)', border: OutlineInputBorder())),
+                const SizedBox(height: 14),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: m.isJoined ? const Color(0xFF00E676) : const Color(0xFFFF9800)),
-                  onPressed: m.isJoined || left <= 0 ? null : () => _join(m),
-                  child: Text(m.isJoined ? 'JOINED ✓' : (left > 0 ? 'Join ₹${m.fee}' : 'FULL'), style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800), minimumSize: const Size.fromHeight(46)),
+                  onPressed: _loading ? null : _submit,
+                  child: _loading ? const CircularProgressIndicator(color: Colors.black) : Text(_isLogin ? 'LOGIN' : 'SIGN UP', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                 ),
+                TextButton(onPressed: () => setState(() => _isLogin = !_isLogin), child: Text(_isLogin ? 'New Player? Sign Up' : 'Already have account? Login')),
               ]),
-            ]),
+            ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+  }
+}
+
+class MatchItem {
+  final String id, title, map, mode, time;
+  final int fee, kill, win, slots;
+  int joined;
+  bool isJoined = false;
+  String rId = '15 min before match', rPass = '****';
+  MatchItem(this.id, this.title, this.map, this.mode, this.time, this.fee, this.kill, this.win, this.slots, this.joined);
+}
+
+class HomeScreen extends StatefulWidget {
+  final String uid, token, email;
+  const HomeScreen({super.key, required this.uid, required this.token, required this.email});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _tab = 0, _wallet = 0;
+  String _ign = 'Player', _bgmiId = '0000000000';
+  bool _loading = true;
+  List> _txns = [];
+  final List<MatchItem> _matches = [
+    MatchItem('m1', 'SK ESPORTS Solo Rush #1', 'Erangel', 'SOLO', 'Today, 08:00 PM', 30, 20, 175, 100, 42),
+    MatchItem('m2', 'Midnight Livik Blast #2', 'Livik', 'SOLO', 'Today, 09:30 PM', 20, 15, 100, 52, 19),
+    MatchItem('m3', 'Weekend Miramar Clash #3', 'Miramar', 'SQUAD', 'Tomorrow, 04:00 PM', 50, 40, 300, 100, 64),
+    MatchItem('m4', 'Pro High Stakes #4', 'Vikendi', 'SQUAD', 'Tomorrow, 09:00 PM', 100, 80, 600, 100, 28),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+
+  Future<void> _sync() async {
+    setState(() => _loading = true);
+    try {
+      final uRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
+      if (uRes.statusCode == 200 && uRes.body != 'null') {
+        final d = jsonDecode(uRes.body);
+        _ign = d['ign'] ?? 'SK_Player';
+        _bgmiId = d['bgmiId'] ?? '5123456789';
+        _wallet = int.tryParse(d['wallet'].toString()) ?? 0;
+        if (d['txns'] is Map) _txns = (d['txns'] as Map).values.map((e) => Map<String, dynamic>.from(e)).toList().reversed.toList();
+      }
+      final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'));
+      if (mRes.statusCode == 200 && mRes.body != 'null') {
+        final mMap = jsonDecode(mRes.body);
+        for (final m in _matches) {
+          if (mMap[m.id] != null) {
+            m.joined = mMap[m.id]['joined'] ?? m.joined;
+            m.rId = mMap[m.id]['rId'] ?? m.rId;
+            m.rPass = mMap[m.id]['rPass'] ?? m.rPass;
+            if (mMap[m.id]['players'] is Map && (mMap[m.id]['players'] as Map).containsKey(widget.uid)) m.isJoined = true;
+          }
+        }
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _saveTxn(String title, String sub, int amt, bool credit, String status) async {
+    final t = {'title': title, 'sub': sub, 'amt': amt, 'credit': credit, 'status': status};
+    setState(() => _txns.insert(0, t));
+    await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': _wallet, 'ign': _ign, 'bgmiId': _bgmiId}));
+    await http.post(Uri.parse('$kDbUrl/users/${widget.uid}/txns.json?auth=${widget.token}'), body: jsonEncode(t));
+  }
+
+  void _join(MatchItem m) {
+    final ignC = TextEditingController(text: _ign), idC = TextEditingController(text: _bgmiId);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Join ${m.title}', style: const TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Rule: Minimum BGMI Level 40+ required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+          const SizedBox(height: 8),
+          TextField(controller: ignC, decoration: const InputDecoration(labelText: 'BGMI IGN', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: idC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+            onPressed: () async {
+              if (_wallet < m.fee) { Navigator.pop(ctx); setState(() => _tab = 1); return _msg('Balance kam hai!'); }
+              setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet -= m.fee; m.joined++; m.isJoined = true; });
+              Navigator.pop(ctx);
+              await _saveTxn('Joined: ${m.title}', 'IGN: $_ign', m.fee, false, 'PAID');
+              await http.patch(Uri.parse('$kDbUrl/matches/${m.id}.json?auth=${widget.token}'), body: jsonEncode({'joined': m.joined}));
+              await http.put(Uri.parse('$kDbUrl/matches/${m.id}/players/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': _ign, 'bgmiId': _bgmiId}));
+              _msg('Slot Confirmed!');
+            },
+            child: Text('Pay ₹${m.fee}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _stat(String k, String v, Color c) => Column(children: [
-    Text(k, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-    Text(v, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: c)),
-  ]);
+  void _deposit() {
+    int amt = 50;
+    final utrC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('Add Money (UPI QR)', style: TextStyle(fontSize: 15)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Wrap(spacing: 6, children: [20, 30, 50, 100].map((v) => ChoiceChip(label: Text('₹$v'), selected: amt == v, onSelected: (_) => setS(() => amt = v))).toList()),
+            const Icon(Icons.qr_code_2, size: 76, color: Color(0xFF00E676)),
+            TextField(controller: utrC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '12-Digit UTR Number', border: OutlineInputBorder())),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+              onPressed: () async {
+                if (utrC.text.trim().length < 6) return _msg('Sahi UTR dalein!');
+                setState(() => _wallet += amt);
+                Navigator.pop(ctx);
+                await _saveTxn('UPI Deposit', 'UTR: ${utrC.text.trim()}', amt, true, 'SUBMITTED');
+                await http.post(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'), body: jsonEncode({'uid': widget.uid, 'ign': _ign, 'amt': amt, 'utr': utrC.text.trim()}));
+                _msg('₹$amt Added!');
+              },
+              child: const Text('Add', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-  Widget _walletTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF9800), Color(0xFFE65100)]), borderRadius: BorderRadius.circular(14)),
+  void _editRoom(MatchItem m) {
+    final idC = TextEditingController(text: m.rId), passC = TextEditingController(text: m.rPass);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Update Room ID & Pass', style: TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: idC, decoration: const InputDecoration(labelText: 'Room ID', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: passC, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              setState(() { m.rId = idC.text.trim(); m.rPass = passC.text.trim(); });
+              Navigator.pop(ctx);
+              await http.patch(Uri.parse('$kDbUrl/matches/${m.id}.json?auth=${widget.token}'), body: jsonEncode({'rId': m.rId, 'rPass': m.rPass}));
+              _msg('Live Room Updated!');
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAdmin = widget.email.toLowerCase() == kAdmin.toLowerCase();
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('SK ESPORTS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _sync),
+          Padding(padding: const EdgeInsets.only(right: 12), child: Center(child: Text('₹$_wallet', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 16)))),
+        ],
+      ),
+      body: _loading ? const Center(child: CircularProgressIndicator()) : [
+        ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: _matches.length,
+          itemBuilder: (_, i) {
+            final m = _matches[i];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${m.title} (${m.map} • ${m.mode})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  Text('Time: ${m.time} | Entry: ₹${m.fee} | Kill: ₹${m.kill} | Win: ₹${m.win}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  if (m.isJoined || isAdmin) ...[
+                    const SizedBox(height: 8),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('Room: ${m.rId} | Pass: ${m.rPass}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+                      if (isAdmin) IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
+                    ]),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('${m.joined}/${m.slots} Joined', style: const TextStyle(color: Colors.grey)),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: m.isJoined ? const Color(0xFF00E676) : const Color(0xFFFF9800)),
+                      onPressed: m.isJoined ? null : () => _join(m),
+                      child: Text(m.isJoined ? 'JOINED ✓' : 'Join ₹${m.fee}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    ),
+                  ]),
+                ]),
+              ),
+            );
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.all(16),
           child: Column(children: [
-            const Text('Available Balance', style: TextStyle(color: Colors.white70)),
-            Text('₹$_wallet', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white)),
+            Card(child: ListTile(title: const Text('Wallet Balance'), trailing: Text('₹$_wallet', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00E676))))),
+            ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(44)), onPressed: _deposit, child: const Text('Add Money (UPI QR)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold))),
+            const SizedBox(height: 10),
+            Expanded(child: ListView.builder(itemCount: _txns.length, itemBuilder: (_, i) => ListTile(title: Text(_txns[i]['title']), subtitle: Text(_txns[i]['sub']), trailing: Text('₹${_txns[i]['amt']}')))),
           ]),
         ),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(vertical: 12)), icon: const Icon(Icons.add, color: Colors.black), label: const Text('Add Money', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)), onPressed: _deposit)),
-          const SizedBox(width: 10),
-          Expanded(child: OutlinedButton.icon(style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)), icon: const Icon(Icons.send), label: const Text('Withdraw'), onPressed: _withdraw)),
+        ListView(padding: const EdgeInsets.all(16), children: [
+          Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
+          const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('RULES:\n• BGMI Level 40+ required.\n• Room ID & Pass 15 min pehle milega.'))),
+          ElevatedButton(onPressed: () { Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL')); _msg('Telegram Link Copied!'); }, child: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)')),
+          OutlinedButton(onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen())), child: const Text('Logout', style: TextStyle(color: Colors.redAccent))),
         ]),
-        const SizedBox(height: 14),
-        const Text('Transactions', style: TextStyle(fontWeight: FontWeight.bold)),
-        Expanded(
-          child: _txns.isEmpty
-              ? const Center(child: Text('Koi transaction nahi hai.', style: TextStyle(color: Colors.grey)))
-              : ListView.builder(
-                  itemCount: _txns.length,
-                  itemBuilder: (_, i) {
-                    final t = _txns[i];
-                    return Card(
-                      child: ListTile(
-                        title: Text(t.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                        subtitle: Text('${t.sub} • ${t.status}', style: const TextStyle(fontSize: 11)),
-                        trailing: Text('${t.credit ? '+' : '-'}₹${t.amt}', style: TextStyle(fontWeight: FontWeight.bold, color: t.credit ? const Color(0xFF00E676) : Colors.redAccent)),
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ]),
+      ][_tab],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _tab,
+        selectedItemColor: const Color(0xFFFF9800),
+        onTap: (i) => setState(() => _tab = i),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
+          BottomNavigationBarItem(icon: Icon(Icons.wallet), label: 'Wallet'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+        ],
+      ),
     );
-  }
-
-  Widget _profileTab() {
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Card(
-        child: ListTile(
-          leading: const CircleAvatar(backgroundColor: Color(0xFFFF9800), child: Icon(Icons.person, color: Colors.black)),
-          title: Text(_ign, style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'),
-          isThreeLine: true,
-        ),
-      ),
-      const SizedBox(height: 10),
-      const Card(
-        child: Padding(
-          padding: EdgeInsets.all(14),
-          child: Text('SK ESPORTS RULES:\n• Minimum BGMI Level 40+ ID required.\n• Room ID & Pass 15 min pehle milega.\n• No hacks, teaming or emulators.\n• Winnings 30 min mein credit hongi.', style: TextStyle(fontSize: 13, height: 1.5)),
-        ),
-      ),
-      const SizedBox(height: 10),
-      ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF229ED9), padding: const EdgeInsets.all(14)),
-        icon: const Icon(Icons.send, color: Colors.white),
-        label: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        onPressed: () {
-          Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL'));
-          _msg('Telegram Link Copied!');
-        },
-      ),
-      const SizedBox(height: 10),
-      OutlinedButton.icon(
-        icon: const Icon(Icons.logout, color: Colors.redAccent),
-        label: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
-        onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen())),
-      ),
-    ]);
   }
 }
