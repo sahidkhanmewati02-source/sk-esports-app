@@ -116,8 +116,8 @@ class _HomeScreenState extends State {
   int _tab = 0, _wallet = 0;
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   bool _loading = true;
-  List _matches = [], _txns = [], _pendingDeps = [], _allUsers = [];
-  final _upiC = TextEditingController(), _qrUrlC = TextEditingController();
+  List _matches = [], _txns = [], _deps = [], _users = [];
+  final _upiC = TextEditingController(), _qrC = TextEditingController();
 
   @override
   void initState() {
@@ -126,7 +126,7 @@ class _HomeScreenState extends State {
   }
 
   void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
-  int _num(dynamic v) => int.tryParse(v.toString()) ?? 0;
+  int _num(dynamic v) => int.tryParse('$v') ?? 0;
 
   Future _sync() async {
     setState(() => _loading = true);
@@ -138,7 +138,7 @@ class _HomeScreenState extends State {
         _qrUrl = c['qrUrl'] ?? '';
       }
       _upiC.text = _upiId;
-      _qrUrlC.text = _qrUrl;
+      _qrC.text = _qrUrl;
 
       final uRes = await http.get(Uri.parse('$kDbUrl/users/${w.uid}.json?auth=${w.token}'));
       if (uRes.statusCode == 200 && uRes.body != 'null') {
@@ -151,21 +151,13 @@ class _HomeScreenState extends State {
 
       final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${w.token}'));
       if (mRes.statusCode == 200 && mRes.body != 'null') {
-        final mMap = jsonDecode(mRes.body) as Map;
         final list = [];
-        mMap.forEach((k, v) {
-          if (v is Map) {
-            final item = Map.from(v);
-            item['id'] = k;
-            item['isJoined'] = v['players'] is Map && (v['players'] as Map).containsKey(w.uid);
-            list.add(item);
-          }
+        (jsonDecode(mRes.body) as Map).forEach((k, v) {
+          if (v is Map) list.add({...v, 'id': k, 'isJoined': v['players'] is Map && (v['players'] as Map).containsKey(w.uid)});
         });
         _matches = list;
       } else {
-        final def = {
-          'm1': {'title': 'SK ESPORTS Solo Rush #1', 'map': 'Erangel', 'mode': 'SOLO', 'time': 'Today, 08:00 PM', 'fee': 30, 'kill': 20, 'win': 175, 'slots': 100, 'joined': 0, 'rId': '15 min before match', 'rPass': '****'}
-        };
+        final def = {'m1': {'title': 'SK ESPORTS Solo Rush #1', 'map': 'Erangel', 'mode': 'SOLO', 'time': 'Today, 08:00 PM', 'fee': 30, 'kill': 20, 'win': 175, 'slots': 100, 'joined': 0, 'rId': '15 min before match', 'rPass': '****'}};
         await http.put(Uri.parse('$kDbUrl/matches.json?auth=${w.token}'), body: jsonEncode(def));
         _matches = [{'id': 'm1', ...def['m1']!, 'isJoined': false}];
       }
@@ -174,43 +166,30 @@ class _HomeScreenState extends State {
         final dRes = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${w.token}'));
         final deps = [];
         if (dRes.statusCode == 200 && dRes.body != 'null') {
-          (jsonDecode(dRes.body) as Map).forEach((k, v) {
-            if (v is Map && v['status'] == 'PENDING') {
-              final item = Map.from(v);
-              item['id'] = k;
-              deps.add(item);
-            }
-          });
+          (jsonDecode(dRes.body) as Map).forEach((k, v) { if (v is Map && v['status'] == 'PENDING') deps.add({...v, 'id': k}); });
         }
-        _pendingDeps = deps.reversed.toList();
+        _deps = deps.reversed.toList();
 
         final allRes = await http.get(Uri.parse('$kDbUrl/users.json?auth=${w.token}'));
         final usrs = [];
         if (allRes.statusCode == 200 && allRes.body != 'null') {
-          (jsonDecode(allRes.body) as Map).forEach((k, v) {
-            if (v is Map) {
-              final item = Map.from(v);
-              item['uid'] = k;
-              usrs.add(item);
-            }
-          });
+          (jsonDecode(allRes.body) as Map).forEach((k, v) { if (v is Map) usrs.add({...v, 'uid': k}); });
         }
-        _allUsers = usrs;
+        _users = usrs;
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }
 
-  Future _saveUserTxn(String targetUid, int newBal, String title, String sub, int amt, bool credit, String status) async {
-    final t = {'title': title, 'sub': sub, 'amt': amt, 'credit': credit, 'status': status};
-    if (targetUid == w.uid) setState(() => _txns.insert(0, t));
-    await http.patch(Uri.parse('$kDbUrl/users/$targetUid.json?auth=${w.token}'), body: jsonEncode({'wallet': newBal}));
-    await http.post(Uri.parse('$kDbUrl/users/$targetUid/txns.json?auth=${w.token}'), body: jsonEncode(t));
+  Future _saveTxn(String uid, int bal, String title, String sub, int amt, String status) async {
+    final t = {'title': title, 'sub': sub, 'amt': amt, 'status': status};
+    if (uid == w.uid) setState(() => _txns.insert(0, t));
+    await http.patch(Uri.parse('$kDbUrl/users/$uid.json?auth=${w.token}'), body: jsonEncode({'wallet': bal}));
+    await http.post(Uri.parse('$kDbUrl/users/$uid/txns.json?auth=${w.token}'), body: jsonEncode(t));
   }
 
   void _join(Map m) {
-    final ignC = TextEditingController(text: _ign);
-    final idC = TextEditingController(text: _bgmiId == 'Not Set' ? '' : _bgmiId);
+    final ignC = TextEditingController(text: _ign), idC = TextEditingController(text: _bgmiId == 'Not Set' ? '' : _bgmiId);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -227,15 +206,15 @@ class _HomeScreenState extends State {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () async {
-              if (ignC.text.trim().isEmpty || !RegExp(r'^\d{8,}$').hasMatch(idC.text.trim())) return _msg('Sahi BGMI Name aur ID dalein!');
+              if (ignC.text.trim().isEmpty || !RegExp(r'^\d{8,}$').hasMatch(idC.text.trim())) return _msg('Sahi IGN aur ID dalein!');
               final fee = _num(m['fee']);
-              if ((_wallet - fee).isNegative) { Navigator.pop(ctx); setState(() => _tab = 1); return _msg('Balance kam hai! Wallet mein add karein.'); }
-              final newJoined = _num(m['joined']) + 1;
-              setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = _wallet - fee; m['joined'] = newJoined; m['isJoined'] = true; });
+              if ((_wallet - fee).isNegative) { Navigator.pop(ctx); setState(() => _tab = 1); return _msg('Balance kam hai!'); }
+              final j = _num(m['joined']) + 1;
+              setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = _wallet - fee; m['joined'] = j; m['isJoined'] = true; });
               Navigator.pop(ctx);
               await http.patch(Uri.parse('$kDbUrl/users/${w.uid}.json?auth=${w.token}'), body: jsonEncode({'ign': _ign, 'bgmiId': _bgmiId}));
-              await _saveUserTxn(w.uid, _wallet, 'Joined: ${m['title']}', 'IGN: $_ign', fee, false, 'PAID');
-              await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${w.token}'), body: jsonEncode({'joined': newJoined}));
+              await _saveTxn(w.uid, _wallet, 'Joined: ${m['title']}', 'IGN: $_ign', fee, 'PAID');
+              await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${w.token}'), body: jsonEncode({'joined': j}));
               await http.put(Uri.parse('$kDbUrl/matches/${m['id']}/players/${w.uid}.json?auth=${w.token}'), body: jsonEncode({'ign': _ign, 'bgmiId': _bgmiId}));
               _msg('Slot Confirmed!');
             },
@@ -261,18 +240,11 @@ class _HomeScreenState extends State {
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Wrap(spacing: 6, children: [20, 30, 50, 100].map((v) => ChoiceChip(label: Text('₹$v'), selected: amt == v, onSelected: (_) => setS(() => amt = v))).toList()),
                 const SizedBox(height: 8),
-                Container(
-                  color: Colors.white,
-                  padding: const EdgeInsets.all(6),
-                  child: Image.network(img, height: 150, width: 150, errorBuilder: (_, __, ___) => const Icon(Icons.qr_code_2, size: 120, color: Colors.black)),
-                ),
+                Container(color: Colors.white, padding: const EdgeInsets.all(6), child: Image.network(img, height: 150, width: 150, errorBuilder: (_, __, ___) => const Icon(Icons.qr_code_2, size: 120, color: Colors.black))),
                 const SizedBox(height: 6),
-                InkWell(
-                  onTap: () { Clipboard.setData(ClipboardData(text: _upiId)); _msg('UPI ID Copied!'); },
-                  child: Text('UPI: $_upiId (Tap to Copy)', style: const TextStyle(color: Color(0xFF00E676), fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
+                InkWell(onTap: () { Clipboard.setData(ClipboardData(text: _upiId)); _msg('UPI Copied!'); }, child: Text('UPI: $_upiId (Tap Copy)', style: const TextStyle(color: Color(0xFF00E676), fontSize: 12, fontWeight: FontWeight.bold))),
                 const SizedBox(height: 8),
-                TextField(controller: utrC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '12-Digit UTR / Ref No.', border: OutlineInputBorder())),
+                TextField(controller: utrC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '12-Digit UTR Number', border: OutlineInputBorder())),
               ]),
             ),
             actions: [
@@ -280,12 +252,11 @@ class _HomeScreenState extends State {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
                 onPressed: () async {
-                  if (!RegExp(r'^\d{6,}$').hasMatch(utrC.text.trim())) return _msg('Sahi 12-digit UTR dalein!');
+                  if (!RegExp(r'^\d{6,}$').hasMatch(utrC.text.trim())) return _msg('Sahi UTR dalein!');
                   Navigator.pop(ctx);
-                  await _saveUserTxn(w.uid, _wallet, 'Deposit Request', 'UTR: ${utrC.text.trim()}', amt, true, 'PENDING');
-                  await http.post(Uri.parse('$kDbUrl/deposits.json?auth=${w.token}'),
-                      body: jsonEncode({'uid': w.uid, 'ign': _ign, 'amt': amt, 'utr': utrC.text.trim(), 'status': 'PENDING'}));
-                  _msg('UTR Submitted! Admin approve karte hi balance add hoga.');
+                  await _saveTxn(w.uid, _wallet, 'Deposit Request', 'UTR: ${utrC.text.trim()}', amt, 'PENDING');
+                  await http.post(Uri.parse('$kDbUrl/deposits.json?auth=${w.token}'), body: jsonEncode({'uid': w.uid, 'ign': _ign, 'amt': amt, 'utr': utrC.text.trim(), 'status': 'PENDING'}));
+                  _msg('UTR Submitted! Admin verify karte hi add hoga.');
                 },
                 child: const Text('Submit UTR', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
               ),
@@ -303,7 +274,7 @@ class _HomeScreenState extends State {
       builder: (ctx) => AlertDialog(
         title: const Text('Withdraw Winnings', style: TextStyle(fontSize: 15)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (e.g. name@ybl)', border: OutlineInputBorder())),
+          TextField(controller: upiC, decoration: const InputDecoration(labelText: 'Your UPI ID', border: OutlineInputBorder())),
           const SizedBox(height: 8),
           TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (Min ₹50)', border: OutlineInputBorder())),
         ]),
@@ -316,9 +287,9 @@ class _HomeScreenState extends State {
               if (!upiC.text.contains('@') || (v - 50).isNegative || (_wallet - v).isNegative) return _msg('Valid UPI aur balance check karein!');
               setState(() => _wallet = _wallet - v);
               Navigator.pop(ctx);
-              await _saveUserTxn(w.uid, _wallet, 'UPI Withdrawal', upiC.text.trim(), v, false, 'PENDING');
-              await http.post(Uri.parse('$kDbUrl/withdrawals.json?auth=${w.token}'), body: jsonEncode({'uid': w.uid, 'ign': _ign, 'upi': upiC.text.trim(), 'amt': v, 'status': 'PENDING'}));
-              _msg('Withdrawal Request Sent!');
+              await _saveTxn(w.uid, _wallet, 'UPI Withdrawal', upiC.text.trim(), v, 'PENDING');
+              await http.post(Uri.parse('$kDbUrl/withdrawals.json?auth=${w.token}'), body: jsonEncode({'uid': w.uid, 'ign': _ign, 'upi': upiC.text.trim(), 'amt': v}));
+              _msg('Withdrawal Sent!');
             },
             child: const Text('Withdraw', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
@@ -332,7 +303,7 @@ class _HomeScreenState extends State {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Update Room ID & Pass', style: TextStyle(fontSize: 15)),
+        title: const Text('Room ID & Pass', style: TextStyle(fontSize: 15)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: idC, decoration: const InputDecoration(labelText: 'Room ID', border: OutlineInputBorder())),
           const SizedBox(height: 8),
@@ -346,7 +317,7 @@ class _HomeScreenState extends State {
               setState(() { m['rId'] = idC.text.trim(); m['rPass'] = passC.text.trim(); });
               Navigator.pop(ctx);
               await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${w.token}'), body: jsonEncode({'rId': m['rId'], 'rPass': m['rPass']}));
-              _msg('Live Room Updated!');
+              _msg('Room Updated!');
             },
             child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
@@ -355,28 +326,7 @@ class _HomeScreenState extends State {
     );
   }
 
-  void _showPlayers(Map m) {
-    final pMap = m['players'] is Map ? (m['players'] as Map).values.toList() : [];
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Players (${pMap.length})', style: const TextStyle(fontSize: 15)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: pMap.isEmpty
-              ? const Text('Abhi kisi ne join nahi kiya.')
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: pMap.length,
-                  itemBuilder: (_, i) => ListTile(dense: true, title: Text('${pMap[i]['ign']}'), subtitle: Text('BGMI ID: ${pMap[i]['bgmiId']}')),
-                ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-      ),
-    );
-  }
-
-  void _addMatchDialog() {
+  void _addMatch() {
     final tC = TextEditingController(), mapC = TextEditingController(text: 'Erangel'), modeC = TextEditingController(text: 'SOLO');
     final timeC = TextEditingController(text: 'Today, 08:30 PM'), feeC = TextEditingController(text: '30'), killC = TextEditingController(text: '20'), winC = TextEditingController(text: '175');
     showDialog(
@@ -385,17 +335,202 @@ class _HomeScreenState extends State {
         title: const Text('Create New Match', style: TextStyle(fontSize: 15)),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: tC, decoration: const InputDecoration(labelText: 'Match Title (e.g. Solo Clash #2)')),
-            TextField(controller: mapC, decoration: const InputDecoration(labelText: 'Map (Erangel / Livik / Miramar)')),
-            TextField(controller: modeC, decoration: const InputDecoration(labelText: 'Mode (SOLO / SQUAD)')),
-            TextField(controller: timeC, decoration: const InputDecoration(labelText: 'Match Time')),
-            TextField(controller: feeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry Fee (₹)')),
-            TextField(controller: killC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per Kill (₹)')),
-            TextField(controller: winC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Winner Prize (₹)')),
+            TextField(controller: tC, decoration: const InputDecoration(labelText: 'Title')),
+            TextField(controller: mapC, decoration: const InputDecoration(labelText: 'Map')),
+            TextField(controller: modeC, decoration: const InputDecoration(labelText: 'Mode (SOLO/SQUAD)')),
+            TextField(controller: timeC, decoration: const InputDecoration(labelText: 'Time')),
+            TextField(controller: feeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry Fee')),
+            TextField(controller: killC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per Kill')),
+            TextField(controller: winC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Winner Prize')),
           ]),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
-    
+            onPressed: () async {
+              if (tC.text.trim().isEmpty) return;
+              Navigator.pop(ctx);
+              await http.post(Uri.parse('$kDbUrl/matches.json?auth=${w.token}'),
+                  body: jsonEncode({'title': tC.text.trim(), 'map': mapC.text.trim(), 'mode': modeC.text.trim(), 'time': timeC.text.trim(), 'fee': _num(feeC.text), 'kill': _num(killC.text), 'win': _num(winC.text), 'slots': 100, 'joined': 0, 'rId': '15 min before match', 'rPass': '****'}));
+              _msg('Match Live!');
+              _sync();
+            },
+            child: const Text('Publish', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+    void _sendPrize(Map u) {
+    final amtC = TextEditingController(), noteC = TextEditingController(text: 'Winning Prize');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Send Prize to ${u['ign']}', style: const TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
+          TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Reason')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              final add = _num(amtC.text);
+              if (add == 0) return;
+              Navigator.pop(ctx);
+              await _saveTxn('${u['uid']}', _num(u['wallet']) + add, noteC.text.trim(), 'SK ESPORTS Admin', add, 'CREDITED');
+              _msg('₹$add Sent!');
+              _sync();
+            },
+            child: const Text('Send', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      ListView.builder(
+        padding: const EdgeInsets.all(12),
+        itemCount: _matches.length,
+        itemBuilder: (_, i) {
+          final m = _matches[i], joined = m['isJoined'] == true;
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Expanded(child: Text('${m['title']} (${m['map']} • ${m['mode']})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+                  if (isAdmin) IconButton(icon: const Icon(Icons.delete, color: Colors.redAccent), onPressed: () async { await http.delete(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${w.token}')); _sync(); }),
+                ]),
+                Text('Time: ${m['time']} | Entry: ₹${m['fee']} | Kill: ₹${m['kill']} | Win: ₹${m['win']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                if (joined || isAdmin) ...[
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Room: ${m['rId']} | Pass: ${m['rPass']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+                    if (isAdmin) IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
+                  ]),
+                ],
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('${m['joined']}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey)),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800)),
+                    onPressed: joined ? null : () => _join(m),
+                    child: Text(joined ? 'JOINED ✓' : 'Join ₹${m['fee']}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  ),
+                ]),
+              ]),
+            ),
+          );
+        },
+      ),
+      Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          Card(child: ListTile(title: const Text('Wallet Balance'), trailing: Text('₹$_wallet', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00E676))))),
+          Row(children: [
+            Expanded(child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)), onPressed: _deposit, child: const Text('Add Money', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)))),
+            const SizedBox(width: 10),
+            Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
+          ]),
+          const SizedBox(height: 10),
+          Expanded(child: ListView.builder(itemCount: _txns.length, itemBuilder: (_, i) => ListTile(title: Text('${_txns[i]['title']}'), subtitle: Text('${_txns[i]['sub']} • ${_txns[i]['status']}'), trailing: Text('₹${_txns[i]['amt']}')))),
+        ]),
+      ),
+      ListView(padding: const EdgeInsets.all(16), children: [
+        Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${w.email}'))),
+        const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('RULES:\n• BGMI Level 30+ required.\n• Room ID & Pass 15 min pehle milega.'))),
+        ElevatedButton(onPressed: () { Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL')); _msg('Telegram Copied!'); }, child: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)')),
+        OutlinedButton(onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen())), child: const Text('Logout', style: TextStyle(color: Colors.redAccent))),
+      ]),
+      if (isAdmin)
+        ListView(padding: const EdgeInsets.all(14), children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('CHANGE PAYMENT QR & UPI', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+                const SizedBox(height: 8),
+                TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
+                const SizedBox(height: 8),
+                TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
+                  onPressed: () async {
+                    _upiId = _upiC.text.trim();
+                    _qrUrl = _qrC.text.trim();
+                    await http.put(Uri.parse('$kDbUrl/config.json?auth=${w.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
+                    _msg('New Payment QR Live!');
+                  },
+                  child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+              ]),
+            ),
+          ),
+          ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)), icon: const Icon(Icons.add, color: Colors.black), label: const Text('Create New Match', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)), onPressed: _addMatch),
+          const SizedBox(height: 10),
+          Text('PENDING UTR DEPOSITS (${_deps.length})', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676))),
+          ..._deps.map((d) => Card(
+            child: ListTile(
+              title: Text('${d['ign']} • ₹${d['amt']}'),
+              subtitle: Text('UTR: ${d['utr']}'),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(
+                  icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)),
+                  onPressed: () async {
+                    final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => null);
+                    if (u != null) await _saveTxn('${d['uid']}', _num(u['wallet']) + _num(d['amt']), 'Deposit Approved', 'UTR: ${d['utr']}', _num(d['amt']), 'APPROVED');
+                    await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${w.token}'), body: jsonEncode({'status': 'APPROVED'}));
+                    _msg('Approved!');
+                    _sync();
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                  onPressed: () async {
+                    await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${w.token}'), body: jsonEncode({'status': 'REJECTED'}));
+                    _sync();
+                  },
+                ),
+              ]),
+            ),
+          )),
+          const SizedBox(height: 10),
+          const Text('PLAYERS (Tap to Send Prize)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
+          ..._users.map((u) => Card(child: ListTile(title: Text('${u['ign']} (₹${u['wallet']})'), subtitle: Text('${u['email']} • ID: ${u['bgmiId']}'), trailing: const Icon(Icons.emoji_events, color: Color(0xFFFF9800)), onTap: () => _sendPrize(u)))),
+        ]),
+    ];
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('SK ESPORTS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _sync),
+          Padding(padding: const EdgeInsets.only(right: 12), child: Center(child: Text('₹$_wallet', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 16)))),
+        ],
+      ),
+      body: _loading ? const Center(child: CircularProgressIndicator()) : pages[_tab],
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _tab,
+        selectedItemColor: const Color(0xFFFF9800),
+        onTap: (i) => setState(() => _tab = i),
+        items: [
+          const BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
+          const BottomNavigationBarItem(icon: Icon(Icons.wallet), label: 'Wallet'),
+          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          if (isAdmin) const BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
+        ],
+      ),
+    );
+  }
+}
