@@ -319,11 +319,50 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future _saveTxn(String uid, int bal, String title, String sub, int amt, String status) async {
-    final t = {'title': title, 'sub': sub, 'amt': amt, 'status': status};
+    final now = DateTime.now();
+    final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final t = {'title': title, 'sub': '$sub • $dt', 'amt': amt, 'status': status, 'time': dt};
     if (uid == widget.uid) setState(() => _txns.insert(0, t));
     await http.patch(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'), body: jsonEncode({'wallet': bal}));
     await http.post(Uri.parse('$kDbUrl/users/$uid/txns.json?auth=${widget.token}'), body: jsonEncode(t));
   }
+        void _showHistory([Map? player]) {
+    final list = [];
+    final target = player == null ? _users : [player];
+    for (final u in target) {
+      if (u['txns'] is Map) {
+        (u['txns'] as Map).forEach((_, v) {
+          if (v is Map) list.add({...v, 'ign': u['ign'] ?? 'Player'});
+        });
+      }
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(player == null ? 'All Players History (${list.length})' : '${player['ign']} History (${list.length})', style: const TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 360,
+          child: list.isEmpty
+              ? const Center(child: Text('Koi history nahi mili'))
+              : ListView.builder(
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final t = list[i];
+                    return ListTile(
+                      dense: true,
+                      title: Text('${player == null ? '${t['ign']} • ' : ''}${t['title']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      subtitle: Text('${t['sub'] ?? ''} • ${t['status'] ?? ''}', style: const TextStyle(fontSize: 11)),
+                      trailing: Text('₹${t['amt']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+                    );
+                  },
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
 
   void _join(Map m) {
     final ignC = TextEditingController(text: _ign),
@@ -844,70 +883,157 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: _addMatch,
           ),
           const SizedBox(height: 12),
-          Text('PENDING UTR DEPOSITS (${_deps.length})', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676))),
-          ..._deps.map((d) => Card(
-                child: ListTile(
-                  title: Text('${d['ign']} • ₹${d['amt']}'),
-                  subtitle: Text('UTR: ${d['utr']}'),
-                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                    IconButton(
-                      icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)),
-                      onPressed: () async {
-                        final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => null);
-                        if (u != null) {
-                          await _saveTxn('${d['uid']}', _num(u['wallet']) + _num(d['amt']), 'Deposit Approved', 'UTR: ${d['utr']}', _num(d['amt']), 'APPROVED');
-                        }
-                        await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'APPROVED'}));
-                        _msg('Approved!');
-                        _sync();
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.cancel, color: Colors.redAccent),
-                      onPressed: () async {
-                        await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'}));
-                        _sync();
-                      },
-                    ),
-                  ]),
+                  Card(
+          child: ListTile(
+            leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E676)),
+            title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('Tap karke Approve / Reject karein', style: TextStyle(fontSize: 12)),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () => showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontSize: 15)),
+                content: SizedBox(
+                  width: double.maxFinite,
+                  height: 350,
+                  child: _deps.isEmpty
+                      ? const Center(child: Text('Koi pending deposit nahi hai'))
+                      : ListView.builder(
+                          itemCount: _deps.length,
+                          itemBuilder: (_, i) {
+                            final d = _deps[i];
+                            return Card(
+                              child: ListTile(
+                                title: Text('${d['ign']} • ₹${d['amt']}'),
+                                subtitle: Text('UTR: ${d['utr']}'),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)),
+                                      onPressed: () async {
+                                        Navigator.pop(ctx);
+                                        final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => {});
+                                        if (u.isNotEmpty) {
+                                          await _saveTxn('${d['uid']}', _num(u['wallet']) + _num(d['amt']), 'Wallet Deposit', 'UTR: ${d['utr']}', _num(d['amt']), 'APPROVED');
+                                        }
+                                        await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'APPROVED'}));
+                                        _msg('Approved!');
+                                        _sync();
+                                      },
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                                      onPressed: () async {
+                                        Navigator.pop(ctx);
+                                        await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'}));
+                                        _sync();
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                 ),
-              )),
+                actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+              ),
+            ),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.payments, color: Color(0xFFFF9800)),
+            title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('Tap karke UPI copy aur Paid mark karein', style: TextStyle(fontSize: 12)),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () => showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontSize: 15)),
+                content: SizedBox(
+                  width: double.maxFinite,
+                  height: 350,
+                  child: _withs.isEmpty
+                      ? const Center(child: Text('Koi pending withdrawal nahi hai'))
+                      : ListView.builder(
+                          itemCount: _withs.length,
+                          itemBuilder: (_, i) {
+                            final wd = _withs[i];
+                            return Card(
+                              child: ListTile(
+                                title: Text('${wd['ign']} • ₹${wd['amt']}'),
+                                subtitle: Text('UPI: ${wd['upi']}'),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.copy, color: Colors.lightBlueAccent),
+                                      onPressed: () {
+                                        Clipboard.setData(ClipboardData(text: '${wd['upi']}'));
+                                        _msg('Player UPI Copied!');
+                                      },
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)),
+                                      onPressed: () async {
+                                        Navigator.pop(ctx);
+                                        await http.patch(Uri.parse('$kDbUrl/withdrawals/${wd['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'PAID'}));
+                                        final tRes = await http.get(Uri.parse('$kDbUrl/users/${wd['uid']}/txns.json?auth=${widget.token}'));
+                                        if (tRes.statusCode == 200 && tRes.body != 'null') {
+                                          final tMap = jsonDecode(tRes.body) as Map<String, dynamic>;
+                                          for (final e in tMap.entries) {
+                                            if (e.value is Map && e.value['title'] == 'UPI Withdrawal' && e.value['status'] == 'PENDING' && _num(e.value['amt']) == _num(wd['amt'])) {
+                                              await http.patch(Uri.parse('$kDbUrl/users/${wd['uid']}/txns/${e.key}.json?auth=${widget.token}'), body: jsonEncode({'status': 'SUCCESS'}));
+                                              break;
+                                            }
+                                          }
+                                        }
+                                        _msg('Marked as Paid!');
+                                        _sync();
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+              ),
+            ),
+          ),
+        ),
+
+      
           const SizedBox(height: 12),
-          Text('PENDING WITHDRAWALS (${_withs.length})', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-          ..._withs.map((wd) => Card(
-                child: ListTile(
-                  title: Text('${wd['ign']} • ₹${wd['amt']}'),
-                  subtitle: Text('UPI: ${wd['upi']}'),
-                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                    IconButton(
-                      icon: const Icon(Icons.copy, color: Colors.lightBlueAccent),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: '${wd['upi']}'));
-                        _msg('Player UPI Copied!');
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)),
-                      onPressed: () async {
-                        await http.patch(Uri.parse('$kDbUrl/withdrawals/${wd['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'PAID'}));
-                        _msg('Marked as Paid!');
-                        _sync();
-                      },
-                    ),
-                  ]),
+                  Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('PLAYERS (History & Prize)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
+            TextButton.icon(
+              onPressed: () => _showHistory(),
+              icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
+              label: const Text('All History', style: TextStyle(color: Color(0xFFFF9800))),
+            ),
+          ],
+        ),
+        ..._users.map((u) => Card(
+              child: ListTile(
+                title: Text('${u['ign']} (₹${u['wallet']})'),
+                subtitle: Text('${u['email']} • ID: ${u['bgmiId']}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(icon: const Icon(Icons.history, color: Colors.lightBlueAccent), onPressed: () => _showHistory(u)),
+                    IconButton(icon: const Icon(Icons.emoji_events, color: Color(0xFFFF9800)), onPressed: () => _sendPrize(u)),
+                  ],
                 ),
-              )),
-          const SizedBox(height: 12),
-          const Text('PLAYERS (Tap to Send Prize)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
-          ..._users.map((u) => Card(
-                child: ListTile(
-                  title: Text('${u['ign']} (₹${u['wallet']})'),
-                  subtitle: Text('${u['email']} • ID: ${u['bgmiId']}'),
-                  trailing: const Icon(Icons.emoji_events, color: Color(0xFFFF9800)),
-                  onTap: () => _sendPrize(u),
-                ),
-              )),
-        ]),
+              ),
+            )),
+              
     ];
 
     return Scaffold(
