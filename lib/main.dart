@@ -125,8 +125,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0, _wallet = 0;
   String _ign = 'Player', _bgmiId = '0000000000';
   bool _loading = true;
-  List> _txns = [];
-  final List<MatchItem> _matches = [
+  List _txns = [];
+  final List _matches = [
     MatchItem('m1', 'SK ESPORTS Solo Rush #1', 'Erangel', 'SOLO', 'Today, 08:00 PM', 30, 20, 175, 100, 42),
     MatchItem('m2', 'Midnight Livik Blast #2', 'Livik', 'SOLO', 'Today, 09:30 PM', 20, 15, 100, 52, 19),
     MatchItem('m3', 'Weekend Miramar Clash #3', 'Miramar', 'SQUAD', 'Tomorrow, 04:00 PM', 50, 40, 300, 100, 64),
@@ -150,7 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _ign = d['ign'] ?? 'SK_Player';
         _bgmiId = d['bgmiId'] ?? '5123456789';
         _wallet = int.tryParse(d['wallet'].toString()) ?? 0;
-        if (d['txns'] is Map) _txns = (d['txns'] as Map).values.map((e) => Map<String, dynamic>.from(e)).toList().reversed.toList();
+        if (d['txns'] is Map) _txns = (d['txns'] as Map).values.toList().reversed.toList();
       }
       final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'));
       if (mRes.statusCode == 200 && mRes.body != 'null') {
@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await http.post(Uri.parse('$kDbUrl/users/${widget.uid}/txns.json?auth=${widget.token}'), body: jsonEncode(t));
   }
 
-  void _join(MatchItem m) {
+  void _join(dynamic m) {
     final ignC = TextEditingController(text: _ign), idC = TextEditingController(text: _bgmiId);
     showDialog(
       context: context,
@@ -233,7 +233,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 await http.post(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'), body: jsonEncode({'uid': widget.uid, 'ign': _ign, 'amt': amt, 'utr': utrC.text.trim()}));
                 _msg('₹$amt Added!');
               },
-              child: const Text('Add', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              child: const Text('Add', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -241,7 +241,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _editRoom(MatchItem m) {
+  void _editRoom(dynamic m) {
     final idC = TextEditingController(text: m.rId), passC = TextEditingController(text: m.rPass);
     showDialog(
       context: context,
@@ -321,7 +321,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Card(child: ListTile(title: const Text('Wallet Balance'), trailing: Text('₹$_wallet', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00E676))))),
             ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(44)), onPressed: _deposit, child: const Text('Add Money (UPI QR)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold))),
             const SizedBox(height: 10),
-            Expanded(child: ListView.builder(itemCount: _txns.length, itemBuilder: (_, i) => ListTile(title: Text(_txns[i]['title']), subtitle: Text(_txns[i]['sub']), trailing: Text('₹${_txns[i]['amt']}')))),
+            Expanded(child: ListView.builder(itemCount: _txns.length, itemBuilder: (_, i) => ListTile(title: Text('${_txns[i]['title']}'), subtitle: Text('${_txns[i]['sub']}'), trailing: Text('₹${_txns[i]['amt']}')))),
           ]),
         ),
         ListView(padding: const EdgeInsets.all(16), children: [
