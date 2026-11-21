@@ -34,16 +34,14 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State {
   bool _isLogin = true, _loading = false;
-  final _email = TextEditingController(), _pass = TextEditingController(), _ign = TextEditingController(), _id = TextEditingController();
+  final _email = TextEditingController(), _pass = TextEditingController(), _name = TextEditingController();
 
   void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
 
   Future _submit() async {
     final e = _email.text.trim(), p = _pass.text.trim();
     if (!e.contains('@') || !RegExp(r'^.{6,}$').hasMatch(p)) return _msg('Sahi Email aur 6+ digit Password dalein!');
-    if (!_isLogin && (_ign.text.trim().isEmpty || !RegExp(r'^\d{8,}$').hasMatch(_id.text.trim()))) {
-      return _msg('Sahi BGMI IGN aur 8+ digit BGMI ID dalein!');
-    }
+    if (!_isLogin && _name.text.trim().isEmpty) return _msg('Apna Naam dalein!');
     setState(() => _loading = true);
     try {
       final ep = _isLogin ? 'accounts:signInWithPassword' : 'accounts:signUp';
@@ -57,7 +55,7 @@ class _AuthScreenState extends State {
       final String uid = data['localId'], token = data['idToken'];
       if (!_isLogin) {
         await http.put(Uri.parse('$kDbUrl/users/$uid.json?auth=$token'),
-            body: jsonEncode({'email': e, 'ign': _ign.text.trim(), 'bgmiId': _id.text.trim(), 'wallet': 0}));
+            body: jsonEncode({'email': e, 'ign': _name.text.trim(), 'bgmiId': 'Not Set', 'wallet': 0}));
       }
       if (!mounted) return;
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomeScreen(uid: uid, token: token, email: e)));
@@ -83,9 +81,7 @@ class _AuthScreenState extends State {
                 Text(_isLogin ? 'Player Login' : 'Create Account', style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 14),
                 if (!_isLogin) ...[
-                  TextField(controller: _ign, decoration: const InputDecoration(labelText: 'BGMI Name (IGN)', border: OutlineInputBorder())),
-                  const SizedBox(height: 10),
-                  TextField(controller: _id, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID (Level 40+)', border: OutlineInputBorder())),
+                  TextField(controller: _name, decoration: const InputDecoration(labelText: 'Your Name', border: OutlineInputBorder())),
                   const SizedBox(height: 10),
                 ],
                 TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
@@ -126,7 +122,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State {
   HomeScreen get w => widget as HomeScreen;
   int _tab = 0, _wallet = 0;
-  String _ign = 'Player', _bgmiId = '0000000000';
+  String _ign = 'Player', _bgmiId = 'Not Set';
   bool _loading = true;
   List _txns = [];
   final List _matches = [
@@ -151,7 +147,7 @@ class _HomeScreenState extends State {
       if (uRes.statusCode == 200 && uRes.body != 'null') {
         final d = jsonDecode(uRes.body);
         _ign = d['ign'] ?? 'SK_Player';
-        _bgmiId = d['bgmiId'] ?? '5123456789';
+        _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = int.tryParse(d['wallet'].toString()) ?? 0;
         if (d['txns'] is Map) _txns = (d['txns'] as Map).values.toList().reversed.toList();
       }
@@ -179,23 +175,25 @@ class _HomeScreenState extends State {
   }
 
   void _join(dynamic m) {
-    final ignC = TextEditingController(text: _ign), idC = TextEditingController(text: _bgmiId);
+    final ignC = TextEditingController(text: _ign);
+    final idC = TextEditingController(text: _bgmiId == 'Not Set' ? '' : _bgmiId);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Join ${m.title}', style: const TextStyle(fontSize: 15)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Rule: Minimum BGMI Level 40+ required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+          const Text('Rule: Minimum BGMI Level 30+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
           const SizedBox(height: 8),
-          TextField(controller: ignC, decoration: const InputDecoration(labelText: 'BGMI IGN', border: OutlineInputBorder())),
+          TextField(controller: ignC, decoration: const InputDecoration(labelText: 'BGMI Name (IGN)', border: OutlineInputBorder())),
           const SizedBox(height: 8),
-          TextField(controller: idC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID', border: OutlineInputBorder())),
+          TextField(controller: idC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID (10 Digits)', border: OutlineInputBorder())),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () async {
+              if (ignC.text.trim().isEmpty || !RegExp(r'^\d{8,}$').hasMatch(idC.text.trim())) return _msg('Sahi BGMI Name aur ID dalein!');
               final int fee = m.fee;
               if ((_wallet - fee).isNegative) { Navigator.pop(ctx); setState(() => _tab = 1); return _msg('Balance kam hai!'); }
               setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = _wallet - fee; m.joined++; m.isJoined = true; });
@@ -330,7 +328,7 @@ class _HomeScreenState extends State {
         ),
         ListView(padding: const EdgeInsets.all(16), children: [
           Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${w.email}'))),
-          const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('RULES:\n• BGMI Level 40+ required.\n• Room ID & Pass 15 min pehle milega.'))),
+          const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('RULES:\n• BGMI Level 30+ required.\n• Room ID & Pass 15 min pehle milega.'))),
           ElevatedButton(onPressed: () { Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL')); _msg('Telegram Link Copied!'); }, child: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)')),
           OutlinedButton(onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen())), child: const Text('Logout', style: TextStyle(color: Colors.redAccent))),
         ]),
