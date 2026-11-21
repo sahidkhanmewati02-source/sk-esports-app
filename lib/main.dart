@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 void main() {
-  runApp(const SKEsportsApp());
+  runApp(const SKEsportsUserApp());
 }
 
-class SKEsportsApp extends StatelessWidget {
-  const SKEsportsApp({super.key});
+class SKEsportsUserApp extends StatelessWidget {
+  const SKEsportsUserApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -21,22 +22,25 @@ class SKEsportsApp extends StatelessWidget {
           secondary: Color(0xFF00E676),
         ),
       ),
-      home: const MainHomeScreen(),
+      home: const UserHomeScreen(),
     );
   }
 }
 
 class MatchModel {
-  String id;
-  String title;
-  String map;
-  String mode;
-  String time;
-  int entryFee;
-  int perKill;
-  int chickenDinner;
-  int maxSlots;
-  List<PlayerEntry> joinedPlayers;
+  final String id;
+  final String title;
+  final String map;
+  final String mode;
+  final String time;
+  final int entryFee;
+  final int perKill;
+  final int chickenDinner;
+  final int maxSlots;
+  int joinedCount;
+  bool isJoined;
+  String roomId;
+  String roomPass;
 
   MatchModel({
     required this.id,
@@ -48,36 +52,41 @@ class MatchModel {
     required this.perKill,
     required this.chickenDinner,
     required this.maxSlots,
-    required this.joinedPlayers,
+    required this.joinedCount,
+    this.isJoined = false,
+    this.roomId = 'Wait (15 min before match)',
+    this.roomPass = '****',
   });
 }
 
-class PlayerEntry {
-  String ign;
-  String bgmiId;
-  int kills;
-  bool isWinner;
-  int prizeWon;
+class WalletTxn {
+  final String title;
+  final String subtitle;
+  final int amount;
+  final bool isCredit;
+  final String status;
 
-  PlayerEntry({
-    required this.ign,
-    required this.bgmiId,
-    this.kills = 0,
-    this.isWinner = false,
-    this.prizeWon = 0,
+  WalletTxn({
+    required this.title,
+    required this.subtitle,
+    required this.amount,
+    required this.isCredit,
+    required this.status,
   });
 }
 
-class MainHomeScreen extends StatefulWidget {
-  const MainHomeScreen({super.key});
+class UserHomeScreen extends StatefulWidget {
+  const UserHomeScreen({super.key});
 
   @override
-  State<MainHomeScreen> createState() => _MainHomeScreenState();
+  State<UserHomeScreen> createState() => _UserHomeScreenState();
 }
 
-class _MainHomeScreenState extends State<MainHomeScreen> {
+class _UserHomeScreenState extends State<UserHomeScreen> {
   int _selectedIndex = 0;
-  int _userWalletBalance = 100;
+  int _walletBalance = 100;
+  String _playerIgn = 'SK_Player01';
+  String _playerBgmiId = '5123456789';
 
   final List<MatchModel> _matches = [
     MatchModel(
@@ -90,10 +99,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       perKill: 20,
       chickenDinner: 175,
       maxSlots: 100,
-      joinedPlayers: [
-        PlayerEntry(ign: 'SK_SahidYT', bgmiId: '5123456789'),
-        PlayerEntry(ign: 'MortalPro', bgmiId: '5987654321'),
-      ],
+      joinedCount: 42,
+      roomId: '8849201',
+      roomPass: 'SK2026',
     ),
     MatchModel(
       id: 'M2',
@@ -105,27 +113,51 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       perKill: 15,
       chickenDinner: 100,
       maxSlots: 52,
-      joinedPlayers: [
-        PlayerEntry(ign: 'SniperKing', bgmiId: '5544332211'),
-      ],
+      joinedCount: 19,
     ),
     MatchModel(
       id: 'M3',
-      title: 'Pro Squad High Stakes #3',
+      title: 'Weekend Miramar Clash #3',
       map: 'Miramar',
       mode: 'SQUAD',
       time: 'Tomorrow, 04:00 PM',
+      entryFee: 50,
+      perKill: 40,
+      chickenDinner: 300,
+      maxSlots: 100,
+      joinedCount: 64,
+    ),
+    MatchModel(
+      id: 'M4',
+      title: 'Pro High Stakes #4',
+      map: 'Vikendi',
+      mode: 'SQUAD',
+      time: 'Tomorrow, 09:00 PM',
       entryFee: 100,
       perKill: 80,
-      chickenDinner: 500,
+      chickenDinner: 600,
       maxSlots: 100,
-      joinedPlayers: [],
+      joinedCount: 28,
     ),
   ];
 
+  final List<WalletTxn> _txns = [
+    WalletTxn(
+      title: 'Welcome Bonus',
+      subtitle: 'SK ESPORTS New Player',
+      amount: 100,
+      isCredit: true,
+      status: 'SUCCESS',
+    ),
+  ];
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   void _joinMatchDialog(MatchModel match) {
-    final ignController = TextEditingController();
-    final idController = TextEditingController();
+    final ignCtrl = TextEditingController(text: _playerIgn);
+    final idCtrl = TextEditingController(text: _playerBgmiId);
 
     showDialog(
       context: context,
@@ -135,13 +167,20 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Entry Fee: ₹${match.entryFee} (Level 40+ ID Required)',
-              style: const TextStyle(color: Color(0xFFFF9800), fontSize: 13),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0x22FF9800),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Rule: Minimum BGMI ID Level 40+ required. No emulators/hacks.',
+                style: TextStyle(color: Color(0xFFFF9800), fontSize: 12),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: ignController,
+              controller: ignCtrl,
               decoration: const InputDecoration(
                 labelText: 'BGMI In-Game Name (IGN)',
                 border: OutlineInputBorder(),
@@ -149,7 +188,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             ),
             const SizedBox(height: 10),
             TextField(
-              controller: idController,
+              controller: idCtrl,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
                 labelText: 'BGMI Character ID (10 Digits)',
@@ -159,33 +198,199 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () {
-              if (ignController.text.isEmpty || idController.text.isEmpty) return;
-              if (_userWalletBalance < match.entryFee) {
+              if (ignCtrl.text.trim().isEmpty || idCtrl.text.trim().length < 8) {
+                _showSnack('Sahi BGMI Name aur ID dalein!');
+                return;
+              }
+              if (_walletBalance < match.entryFee) {
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Wallet balance kam hai! Razorpay se add karein.')),
-                );
+                setState(() => _selectedIndex = 1);
+                _showSnack('Balance kam hai! Pehle Wallet mein paise add karein.');
                 return;
               }
               setState(() {
-                _userWalletBalance -= match.entryFee;
-                match.joinedPlayers.add(
-                  PlayerEntry(ign: ignController.text.trim(), bgmiId: idController.text.trim()),
+                _playerIgn = ignCtrl.text.trim();
+                _playerBgmiId = idCtrl.text.trim();
+                _walletBalance -= match.entryFee;
+                match.joinedCount++;
+                match.isJoined = true;
+                _txns.insert(
+                  0,
+                  WalletTxn(
+                    title: 'Joined: ${match.title}',
+                    subtitle: 'IGN: $_playerIgn',
+                    amount: match.entryFee,
+                    isCredit: false,
+                    status: 'PAID',
+                  ),
                 );
               });
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Slot Confirmed! ₹${match.entryFee} deducted.')),
-              );
+              _showSnack('Slot Confirmed! Room ID ab card par dikhega.');
             },
-            child: Text('Pay ₹${match.entryFee} & Join', style: const TextStyle(color: Colors.black)),
+            child: Text('Pay ₹${match.entryFee} & Join',
+                style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDepositDialog() {
+    int selectedAmt = 50;
+    final utrCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF161B22),
+          title: const Text('Add Money via Razorpay', style: TextStyle(fontSize: 16)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  children: [20, 30, 50, 100, 200].map((amt) {
+                    final active = selectedAmt == amt;
+                    return ChoiceChip(
+                      label: Text('₹$amt'),
+                      selected: active,
+                      selectedColor: const Color(0xFFFF9800),
+                      onSelected: (_) => setDialogState(() => selectedAmt = amt),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0D1117),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.qr_code_2, size: 90, color: Color(0xFF00E676)),
+                      const SizedBox(height: 6),
+                      Text('Pay ₹$selectedAmt on SK ESPORTS Razorpay QR',
+                          textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: utrCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '12-Digit UPI Ref / UTR Number',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+              onPressed: () {
+                if (utrCtrl.text.trim().length < 6) {
+                  _showSnack('Sahi UTR / Reference Number dalein!');
+                  return;
+                }
+                setState(() {
+                  _walletBalance += selectedAmt;
+                  _txns.insert(
+                    0,
+                    WalletTxn(
+                      title: 'Razorpay Deposit',
+                      subtitle: 'UTR: ${utrCtrl.text.trim()}',
+                      amount: selectedAmt,
+                      isCredit: true,
+                      status: 'VERIFIED',
+                    ),
+                  );
+                });
+                Navigator.pop(ctx);
+                _showSnack('₹$selectedAmt Wallet mein add ho gaye!');
+              },
+              child: const Text('Submit & Add',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showWithdrawDialog() {
+    final upiCtrl = TextEditingController();
+    final amtCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('Withdraw to UPI', style: TextStyle(fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: upiCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Your UPI ID (e.g. name@ybl)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: amtCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Amount (Min ₹50)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () {
+              final amt = int.tryParse(amtCtrl.text.trim()) ?? 0;
+              if (!upiCtrl.text.contains('@') || amt < 50) {
+                _showSnack('Sahi UPI ID aur kam se kam ₹50 dalein!');
+                return;
+              }
+              if (amt > _walletBalance) {
+                _showSnack('Itna balance wallet mein nahi hai!');
+                return;
+              }
+              setState(() {
+                _walletBalance -= amt;
+                _txns.insert(
+                  0,
+                  WalletTxn(
+                    title: 'UPI Withdrawal',
+                    subtitle: 'To: ${upiCtrl.text.trim()}',
+                    amount: amt,
+                    isCredit: false,
+                    status: 'PENDING',
+                  ),
+                );
+              });
+              Navigator.pop(ctx);
+              _showSnack('₹$amt Withdrawal Request bhej di gayi hai!');
+            },
+            child: const Text('Withdraw Now',
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -197,7 +402,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     final pages = [
       _buildMatchesTab(),
       _buildWalletTab(),
-      _buildAdminTab(),
+      _buildProfileTab(),
     ];
 
     return Scaffold(
@@ -211,18 +416,21 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           ],
         ),
         actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 12, top: 10, bottom: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF21262D),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFFFF9800)),
-            ),
-            child: Center(
-              child: Text(
-                '₹$_userWalletBalance',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676)),
+          GestureDetector(
+            onTap: () => setState(() => _selectedIndex = 1),
+            child: Container(
+              margin: const EdgeInsets.only(right: 12, top: 10, bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF21262D),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFFFF9800)),
+              ),
+              child: Center(
+                child: Text(
+                  '₹$_walletBalance',
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676)),
+                ),
               ),
             ),
           ),
@@ -237,7 +445,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
           BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: 'Wallet'),
-          BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile & Rules'),
         ],
       ),
     );
@@ -249,10 +457,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       itemCount: _matches.length,
       itemBuilder: (context, index) {
         final m = _matches[index];
-        final slotsLeft = m.maxSlots - m.joinedPlayers.length;
+        final slotsLeft = m.maxSlots - m.joinedCount;
         return Card(
           margin: const EdgeInsets.only(bottom: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: m.isJoined ? const Color(0xFF00E676) : Colors.transparent),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
@@ -270,7 +481,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         color: const Color(0x33FF9800),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: Text('${m.map} • ${m.mode}', style: const TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                      child: Text('${m.map} • ${m.mode}',
+                          style: const TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
                     ),
                   ],
                 ),
@@ -285,23 +497,53 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     _infoBox('CHICKEN DINNER', '₹${m.chickenDinner}', const Color(0xFFFF9800)),
                   ],
                 ),
-                const SizedBox(height: 14),
+                if (m.isJoined) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0x1A00E676),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF00E676)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Room ID: ${m.roomId}  |  Pass: ${m.roomPass}',
+                            style: const TextStyle(
+                                color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 13)),
+                        InkWell(
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(text: m.roomId));
+                            _showSnack('Room ID Copied!');
+                          },
+                          child: const Icon(Icons.copy, size: 18, color: Color(0xFF00E676)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
                 LinearProgressIndicator(
-                  value: m.joinedPlayers.length / m.maxSlots,
+                  value: m.joinedCount / m.maxSlots,
                   backgroundColor: Colors.grey[800],
-                  color: const Color(0xFFFF9800),
+                  color: m.isJoined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
                 ),
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('${m.joinedPlayers.length}/${m.maxSlots} Joined ($slotsLeft left)',
+                    Text('${m.joinedCount}/${m.maxSlots} Joined ($slotsLeft left)',
                         style: const TextStyle(fontSize: 12, color: Colors.grey)),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
-                      onPressed: slotsLeft > 0 ? () => _joinMatchDialog(m) : null,
-                      child: Text(slotsLeft > 0 ? 'Join ₹${m.entryFee}' : 'FULL',
-                          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: m.isJoined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
+                      ),
+                      onPressed: m.isJoined ? null : (slotsLeft > 0 ? () => _joinMatchDialog(m) : null),
+                      child: Text(
+                        m.isJoined ? 'JOINED ✓' : (slotsLeft > 0 ? 'Join ₹${m.entryFee}' : 'FULL'),
+                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
@@ -327,6 +569,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: double.infinity,
@@ -336,203 +579,4 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               borderRadius: BorderRadius.circular(14),
             ),
             child: Column(
-              children: [
-                const Text('Available Balance', style: TextStyle(color: Colors.white70)),
-                const SizedBox(height: 6),
-                Text('₹$_userWalletBalance',
-                    style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.white)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00E676),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  icon: const Icon(Icons.qr_code_2, color: Colors.black),
-                  label: const Text('Add Money (Razorpay)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                  onPressed: () {
-                    setState(() => _userWalletBalance += 50);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Demo: ₹50 Added via Razorpay QR!')),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                  icon: const Icon(Icons.send_to_mobile),
-                  label: const Text('Withdraw UPI'),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('RazorpayX UPI Payout Request Submitted!')),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAdminTab() {
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        children: [
-          const TabBar(
-            indicatorColor: Color(0xFFFF9800),
-            tabs: [
-              Tab(text: 'Create Match'),
-              Tab(text: 'Add Kills & Prizes'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                _buildCreateMatchForm(),
-                _buildKillCalculator(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCreateMatchForm() {
-    final titleCtrl = TextEditingController(text: 'SK ESPORTS Evening Clash');
-    final mapCtrl = TextEditingController(text: 'Erangel');
-    final feeCtrl = TextEditingController(text: '50');
-    final killCtrl = TextEditingController(text: '40');
-    final cdCtrl = TextEditingController(text: '250');
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Match Title')),
-          TextField(controller: mapCtrl, decoration: const InputDecoration(labelText: 'Map (Erangel / Livik / Miramar)')),
-          TextField(controller: feeCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry Fee (₹20, ₹30, ₹50, ₹100)')),
-          TextField(controller: killCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per Kill Reward (₹)')),
-          TextField(controller: cdCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Chicken Dinner Prize (₹)')),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800), padding: const EdgeInsets.all(14)),
-              onPressed: () {
-                setState(() {
-                  _matches.insert(
-                    0,
-                    MatchModel(
-                      id: 'M${_matches.length + 1}',
-                      title: titleCtrl.text,
-                      map: mapCtrl.text,
-                      mode: 'SOLO',
-                      time: 'Today, 10:00 PM',
-                      entryFee: int.tryParse(feeCtrl.text) ?? 30,
-                      perKill: int.tryParse(killCtrl.text) ?? 20,
-                      chickenDinner: int.tryParse(cdCtrl.text) ?? 175,
-                      maxSlots: 100,
-                      joinedPlayers: [],
-                    ),
-                  );
-                  _selectedIndex = 0;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('New Match Published Live!')),
-                );
-              },
-              child: const Text('Publish New Match', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKillCalculator() {
-    final activeMatch = _matches.first;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Text('Scoring: ${activeMatch.title}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-        Text('Rate: ₹${activeMatch.perKill}/Kill | Chicken Dinner: ₹${activeMatch.chickenDinner}',
-            style: const TextStyle(color: Colors.grey, fontSize: 12)),
-        const SizedBox(height: 12),
-        ...activeMatch.joinedPlayers.map((player) {
-          final totalPrize = (player.kills * activeMatch.perKill) + (player.isWinner ? activeMatch.chickenDinner : 0);
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('${player.ign} (ID: ${player.bgmiId})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      Text('Total: ₹$totalPrize',
-                          style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      const Text('Kills: '),
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline),
-                        onPressed: () => setState(() {
-                          if (player.kills > 0) player.kills--;
-                        }),
-                      ),
-                      Text('${player.kills}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle_outline),
-                        onPressed: () => setState(() => player.kills++),
-                      ),
-                      const Spacer(),
-                      const Text('Chicken Dinner: '),
-                      Switch(
-                        value: player.isWinner,
-                        activeColor: const Color(0xFFFF9800),
-                        onChanged: (val) => setState(() => player.isWinner = val),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-        const SizedBox(height: 12),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.all(14)),
-          onPressed: () {
-            int sahidPrize = 0;
-            for (var p in activeMatch.joinedPlayers) {
-              p.prizeWon = (p.kills * activeMatch.perKill) + (p.isWinner ? activeMatch.chickenDinner : 0);
-              if (p.ign == 'SK_SahidYT') sahidPrize = p.prizeWon;
-            }
-            setState(() {
-              _userWalletBalance += sahidPrize;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Result Published! ₹$sahidPrize added to wallet.')),
-            );
-          },
-          child: const Text('Publish Result & Credit Wallets',
-              style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-        ),
-      ],
-    );
-  }
-}
+     
