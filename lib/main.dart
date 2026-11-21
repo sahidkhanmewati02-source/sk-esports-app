@@ -31,9 +31,8 @@ class AuthScreen extends StatefulWidget {
   @override
   State createState() => _AuthScreenState();
 }
-
 class _AuthScreenState extends State {
-  bool _isLogin = true, _loading = false;
+  bool _isLogin = true, _loading = false, _showPass = false;
   final _email = TextEditingController(), _pass = TextEditingController(), _name = TextEditingController();
 
   void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
@@ -86,7 +85,18 @@ class _AuthScreenState extends State {
                 ],
                 TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
                 const SizedBox(height: 10),
-                TextField(controller: _pass, obscureText: true, decoration: const InputDecoration(labelText: 'Password (6+ chars)', border: OutlineInputBorder())),
+                TextField(
+                  controller: _pass,
+                  obscureText: !_showPass,
+                  decoration: InputDecoration(
+                    labelText: 'Password (6+ chars)',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(_showPass ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setState(() => _showPass = !_showPass),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 14),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800), minimumSize: const Size.fromHeight(46)),
@@ -102,6 +112,7 @@ class _AuthScreenState extends State {
     );
   }
 }
+
 
 class HomeScreen extends StatefulWidget {
   final String uid, token, email;
