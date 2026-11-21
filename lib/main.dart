@@ -983,7 +983,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                         final tRes = await http.get(Uri.parse('$kDbUrl/users/${wd['uid']}/txns.json?auth=${widget.token}'));
                                         if (tRes.statusCode == 200 && tRes.body != 'null') {
                                           final tMap = jsonDecode(tRes.body) as Map<String, dynamic>;
-                                          for (final e in tMap.entries) {
+                                          for (final e in tMap.entries.toList().reversed) {
+                                                
                                             if (e.value is Map && e.value['title'] == 'UPI Withdrawal' && e.value['status'] == 'PENDING' && _num(e.value['amt']) == _num(wd['amt'])) {
                                               await http.patch(Uri.parse('$kDbUrl/users/${wd['uid']}/txns/${e.key}.json?auth=${widget.token}'), body: jsonEncode({'status': 'SUCCESS'}));
                                               break;
