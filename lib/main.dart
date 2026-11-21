@@ -613,7 +613,48 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-
+  void _showPlayers(Map m) {
+    final pMap = m['players'] is Map ? m['players'] as Map : {};
+    final list = pMap.entries.toList();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Players (${list.length}/${m['slots']})', style: const TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: list.isEmpty
+              ? const Text('Abhi kisi ne join nahi kiya hai.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final uid = list[i].key.toString();
+                    final p = list[i].value is Map ? list[i].value as Map : {};
+                    final u = _users.firstWhere(
+                      (x) => x['uid'] == uid,
+                      orElse: () => {'uid': uid, 'ign': p['ign'] ?? 'Player', 'wallet': 0},
+                    );
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${i + 1}. ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Text('ID: ${p['bgmiId'] ?? '-'}', style: const TextStyle(fontSize: 12)),
+                      trailing: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _sendPrize(u);
+                        },
+                        child: const Text('Send Prize', style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+      
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -665,8 +706,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 const SizedBox(height: 8),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text('${m['joined']}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey)),
-                  ElevatedButton(
+              
+                                       if (isAdmin)
+                        OutlinedButton(
+                          onPressed: () => _showPlayers(m),
+                          child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800))),
+                        ),
+
+                      Text('${m['joined']}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey)),
+                  ElevatedButton( 
+                    
                     style: ElevatedButton.styleFrom(
                       backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
                     ),
