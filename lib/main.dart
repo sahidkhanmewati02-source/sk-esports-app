@@ -376,28 +376,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _deposit() {
-    int amt = 50;
+        final amtC = TextEditingController(text: '50');
+        
     final utrC = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
+                 final amt = int.tryParse(amtC.text.trim()) ?? 0;
+
           final autoQr = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${Uri.encodeComponent('upi://pay?pa=$_upiId&pn=SK%20ESPORTS&am=$amt&cu=INR')}';
           final img = _qrUrl.trim().isNotEmpty ? _qrUrl.trim() : autoQr;
           return AlertDialog(
             title: const Text('Add Money (Scan & Pay)', style: TextStyle(fontSize: 15)),
             content: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Wrap(
-                  spacing: 6,
-                  children: [20, 30, 50, 100]
-                      .map((v) => ChoiceChip(
-                            label: Text('₹$v'),
-                            selected: amt == v,
-                            onSelected: (_) => setS(() => amt = v),
-                          ))
-                      .toList(),
-                ),
+            
+                                TextField(
+                controller: amtC,
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setS(() {}),
+                decoration: const InputDecoration(labelText: 'Enter Amount (₹)', border: OutlineInputBorder()),
+              ),
+                      
                 const SizedBox(height: 8),
                 Container(
                   color: Colors.white,
@@ -429,9 +430,22 @@ class _HomeScreenState extends State<HomeScreen> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
                 onPressed: () async {
-                  if (!RegExp(r'^\d{6,}$').hasMatch(utrC.text.trim())) {
-                    return _msg('Sahi UTR dalein!');
-                  }
+                                              if (amt < 10) {
+                          return _msg('Kam se kam ₹10 dalein!');
+                                              }
+                      
+                                          final utr = utrC.text.trim();
+                        if (!RegExp(r'^\d{12}$').hasMatch(utr)) {
+                          return _msg('Sahi 12-Digit UTR dalein!');
+                        }
+                        final chk = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
+                        if (chk.statusCode == 200 && chk.body != 'null') {
+                          final allDeps = jsonDecode(chk.body) as Map<String, dynamic>;
+                          if (allDeps.values.any((d) => d is Map && d['utr']?.toString() == utr && d['status'] != 'REJECTED')) {
+                            return _msg('Ye UTR pehle hi use ho chuka hai!');
+                          }
+                        }
+                      
                   Navigator.pop(ctx);
                   await _saveTxn(widget.uid, _wallet, 'Deposit Request', 'UTR: ${utrC.text.trim()}', amt, 'PENDING');
                   await http.post(
