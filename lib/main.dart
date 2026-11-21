@@ -63,7 +63,23 @@ class _AuthScreenState extends State<AuthScreen> {
 
   void _msg(String s) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
-
+  Future _forgotPass() async {
+    final e = _email.text.trim();
+    if (!e.contains('@')) return _msg('Pehle upar apna Email dalein!');
+    try {
+      final res = await http.post(
+        Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=$kApiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'requestType': 'PASSWORD_RESET', 'email': e}),
+      );
+      final d = jsonDecode(res.body);
+      if (res.statusCode != 200) throw Exception(d['error']?['message'] ?? 'Failed');
+      _msg('Password reset link aapke Email par bhej diya gaya hai!');
+    } catch (err) {
+      _msg(err.toString().replaceAll('Exception: ', ''));
+    }
+  }
+      
   Future _submit() async {
     final e = _email.text.trim(), p = _pass.text.trim();
     if (!e.contains('@') || !RegExp(r'^.{6,}$').hasMatch(p)) {
@@ -149,7 +165,16 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 14),
+                                if (_isLogin)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _forgotPass,
+                      child: const Text('Forgot Password?', style: TextStyle(color: Color(0xFFFF9800))),
+                    ),
+                  ),
+                    
+                  const SizedBox(height: 14),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFF9800),
