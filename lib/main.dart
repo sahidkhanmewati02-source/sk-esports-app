@@ -1037,15 +1037,689 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           TextField(controller: ignC, decoration: const InputDecoration(labelText: 'BGMI Name (IGN)', border: OutlineInputBorder())),
           const SizedBox(height: 8),
-          TextField(controller: idC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID (10 Digits)', border: OutlineInputBorder())),
+          TextField(controller: idC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID (11 Digits)', border: OutlineInputBorder())),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () async {
-              if (ignC.text.trim().isEmpty || !RegExp(r'^\d{8,}$').hasMatch(idC.text.trim())) {
-                return _msg('Sahi IGN aur ID dalein!');
+              if (ignC.text.trim().isEmpty || idC.text.trim().length < 10 || idC.text.trim().length > 11 || !RegExp(r'^\d+
+              }
+              if (_matchClosed(m) || _num(m['joined']) >= _num(m['slots'])) { Navigator.pop(ctx); return _msg('Join band ho chuka hai ya slots full hain.'); }
+              final fee = _num(m['fee']);
+              if ((_wallet - fee).isNegative) {
+                Navigator.pop(ctx);
+                setState(() => _tab = 1);
+                return _msg('Balance kam hai!');
+              }
+              final j = _num(m['joined']) + 1;
+              final oldBalance = _wallet;
+              Navigator.pop(ctx);
+              try {
+                final playerBalance = oldBalance - fee;
+                final pRes = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': playerBalance, 'ign': ignC.text.trim(), 'bgmiId': idC.text.trim()}));
+                if (pRes.statusCode < 200 || pRes.statusCode >= 300) throw Exception('Player wallet update fail hua.');
+                await _saveTxn(widget.uid, playerBalance, 'Joined: ${m['title']}', 'Entry fee added to match collection', fee, 'PAID');
+                final mr = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'joined': j}));
+                final pr = await http.put(Uri.parse('$kDbUrl/matches/${m['id']}/players/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': ignC.text.trim(), 'bgmiId': idC.text.trim(), 'joinedAt': DateTime.now().millisecondsSinceEpoch, 'feePaid': fee}));
+                if (mr.statusCode < 200 || mr.statusCode >= 300 || pr.statusCode < 200 || pr.statusCode >= 300) {
+                  await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': oldBalance}));
+                  throw Exception('Registration save nahi hui; player wallet refund kar diya.');
+                }
+                await _addMatchCollection(m['id'].toString(), m['title'].toString(), fee);
+                if (mounted) setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = playerBalance; m['joined'] = j; m['isJoined'] = true; });
+                _msg('Slot Confirmed! Entry fee match collection mein add ho gayi.');
+              } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
+            },
+            child: Text('Pay ₹${m['fee']}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deposit() {
+        final amtC = TextEditingController(text: '50');
+
+    final utrC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) {
+                 final amt = int.tryParse(amtC.text.trim()) ?? 0;
+
+          final autoQr = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${Uri.encodeComponent('upi://pay?pa=$_upiId&pn=SK%20ESPORTS&am=$amt&cu=INR')}';
+          final img = _qrUrl.trim().isNotEmpty ? _qrUrl.trim() : autoQr;
+          return AlertDialog(
+            title: const Text('Add Money (Scan & Pay)', style: TextStyle(fontSize: 15)),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+
+                                TextField(
+                controller: amtC,
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setS(() {}),
+                decoration: const InputDecoration(labelText: 'Enter Amount (₹)', border: OutlineInputBorder()),
+              ),
+
+                const SizedBox(height: 8),
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(6),
+                  child: Image.network(
+                    img,
+                    height: 150,
+                    width: 150,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.qr_code_2, size: 120, color: Colors.black),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: _upiId));
+                    _msg('UPI Copied!');
+                  },
+                  child: Text(
+                    'UPI: $_upiId (Tap Copy)',
+                    style: const TextStyle(color: Color(0xFF00E676), fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(controller: utrC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '12-Digit UTR Number', border: OutlineInputBorder())),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+                onPressed: () async {
+                                              if (amt < 10) {
+                          return _msg('Kam se kam ₹10 dalein!');
+                                              }
+
+                                          final utr = utrC.text.trim();
+                        if (!RegExp(r'^\d{12}$').hasMatch(utr)) {
+                          return _msg('Sahi 12-Digit UTR dalein!');
+                        }
+                        final chk = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
+                        if (chk.statusCode == 200 && chk.body != 'null') {
+                          final allDeps = jsonDecode(chk.body) as Map<String, dynamic>;
+                          if (allDeps.values.any((d) => d is Map && d['utr']?.toString() == utr && d['status'] != 'REJECTED')) {
+                            return _msg('Ye UTR pehle hi use ho chuka hai!');
+                          }
+                        }
+
+                  Navigator.pop(ctx);
+                  await _saveTxn(widget.uid, _wallet, 'Deposit Request', 'UTR: ${utrC.text.trim()}', amt, 'PENDING');
+                  await http.post(
+                    Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'),
+                    body: jsonEncode({
+                      'uid': widget.uid,
+                      'ign': _ign,
+                      'amt': amt,
+                      'utr': utrC.text.trim(),
+                      'status': 'PENDING',
+                    }),
+                  );
+                  _msg('UTR Submitted! Admin verify karte hi add hoga.');
+                },
+                child: const Text('Submit UTR', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _withdraw() {
+    final upiC = TextEditingController(), amtC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Withdraw Winnings', style: TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: upiC, decoration: const InputDecoration(labelText: 'Your UPI ID', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (Min ₹50)', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              final v = _num(amtC.text.trim());
+              if (!upiC.text.contains('@') || (v - 50).isNegative || (_wallet - v).isNegative) {
+                return _msg('Valid UPI aur balance check karein!');
+              }
+              setState(() => _wallet = _wallet - v);
+              Navigator.pop(ctx);
+              await _saveTxn(widget.uid, _wallet, 'UPI Withdrawal', upiC.text.trim(), v, 'PENDING');
+              await http.post(
+                Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'),
+                body: jsonEncode({'uid': widget.uid,
+                  'ign': _ign,
+                  'upi': upiC.text.trim(),
+                  'amt': v,
+                  'status': 'PENDING',
+                }),
+              );
+              _msg('Withdrawal Sent!');
+            },
+            child: const Text('Withdraw', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _editRoom(Map m) {
+    final idC = TextEditingController(text: '${m['rId']}'),
+        passC = TextEditingController(text: '${m['rPass']}');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Room ID & Pass', style: TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: idC, decoration: const InputDecoration(labelText: 'Room ID', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: passC, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              setState(() {
+                m['rId'] = idC.text.trim();
+                m['rPass'] = passC.text.trim();
+              });
+              Navigator.pop(ctx);
+              await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'rId': m['rId'], 'rPass': m['rPass']}));
+              _msg('Room Updated!');
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+    void _addMatch() {
+    final tC = TextEditingController(),
+        mapC = TextEditingController(text: 'Erangel'),
+        modeC = TextEditingController(text: 'SOLO'),
+        feeC = TextEditingController(text: '30'),
+        killC = TextEditingController(text: '20'),
+        winC = TextEditingController(text: '175'),
+        startC = TextEditingController(text: _dateTimeInput(DateTime.now().add(const Duration(hours: 1)))),
+        roomC = TextEditingController(text: _dateTimeInput(DateTime.now().add(const Duration(minutes: 45))));
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create New Match', style: TextStyle(fontSize: 15)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: tC, decoration: const InputDecoration(labelText: 'Title')),
+            TextField(controller: mapC, decoration: const InputDecoration(labelText: 'Map (Erangel/Miramar/Vikendi/Livik)')),
+            TextField(controller: modeC, decoration: const InputDecoration(labelText: 'Mode (SOLO/SQUAD)')),
+            TextField(controller: startC, readOnly: true, onTap: () => _pickDateTime(startC), decoration: const InputDecoration(labelText: 'Match Date & Time', suffixIcon: Icon(Icons.calendar_month))),
+            const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Registration auto-close selected match date & time par hoga.', style: TextStyle(fontSize: 11, color: Colors.amber))),
+            TextField(controller: roomC, readOnly: true, onTap: () => _pickDateTime(roomC), decoration: const InputDecoration(labelText: 'Room ID Release Date & Time', suffixIcon: Icon(Icons.schedule))),
+            TextField(controller: feeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry Fee')),
+            TextField(controller: killC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per Kill')),
+            TextField(controller: winC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Chicken Dinner Prize')),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+            onPressed: () async {
+              if (tC.text.trim().isEmpty) return;
+              DateTime? parseTime(String v) => DateTime.tryParse(v.trim().replaceFirst(' ', 'T'));
+              final st = parseTime(startC.text), rm = parseTime(roomC.text);
+              if (st == null || rm == null) return _msg('Calendar se match date/time aur room release select karein.');
+              Navigator.pop(ctx);
+              final created = await http.post(
+                Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'),
+                body: jsonEncode({
+                  'title': tC.text.trim(),
+                  'map': mapC.text.trim(),
+                  'mode': modeC.text.trim(),
+                  'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch}),
+                  'startAt': st.millisecondsSinceEpoch,
+                  'closeAt': st.millisecondsSinceEpoch,
+                  'roomReleaseAt': rm.millisecondsSinceEpoch,
+                  'hold': false,
+                  'status': 'OPEN',
+                  'fee': _num(feeC.text),
+                  'kill': _num(killC.text),
+                  'win': _num(winC.text),
+                  'slots': mapC.text.trim().toLowerCase().contains('livik') ? 52 : 100,
+                              'joined': 0,
+            'rId': '15 min before match',
+            'rPass': '****',
+
+
+                }),
+              );
+              if (created.statusCode >= 200 && created.statusCode < 300) {
+                final key = (jsonDecode(created.body) as Map)['name']?.toString();
+                if (key != null) {
+                  final fresh = {'title': tC.text.trim(), 'collection': 0, 'prizeSent': 0, 'settled': false, 'status': 'OPEN', 'updatedAt': DateTime.now().millisecondsSinceEpoch};
+                  await http.put(Uri.parse('$kDbUrl/match_hisaab/$key.json?auth=${widget.token}'), body: jsonEncode(fresh));
+                }
+              }
+              _msg('Match Live!');
+              _sync();
+            },
+            child: const Text('Publish', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _addManualBalance(Map u) {
+    if (!isAdmin) return _msg('Sirf Super Admin / Co-Admin balance add kar sakte hain.');
+    final amountC = TextEditingController();
+    final reasonC = TextEditingController(text: 'Manual Bonus / Refund');
+    final uid = (u['uid'] ?? '').toString();
+    if (uid.isEmpty) return _msg('Player UID nahi mila.');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Add Balance • ${u['ign'] ?? 'Player'}', style: const TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Current balance: ₹${_num(u['wallet'])}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+          TextField(controller: amountC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Add Amount (₹)')),
+          TextField(controller: reasonC, decoration: const InputDecoration(labelText: 'Reason (Bonus / Refund / Test)')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+            onPressed: () async {
+              final amount = _num(amountC.text.trim());
+              final reason = reasonC.text.trim();
+              if (amount <= 0 || reason.isEmpty) return _msg('Valid amount aur reason dalein.');
+              Navigator.pop(ctx);
+              try {
+                final latest = await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'));
+                if (latest.statusCode != 200 || latest.body == 'null') throw Exception('Player account nahi mila.');
+                final player = jsonDecode(latest.body) as Map;
+                final oldBalance = _num(player['wallet']);
+                final newBalance = oldBalance + amount;
+                await _saveTxn(uid, newBalance, reason, 'Manual credit by SK ESPORTS Admin', amount, 'CREDITED');
+                _msg('₹$amount ${u['ign'] ?? 'Player'} ke wallet mein add ho gaye.');
+                await _sync();
+              } catch (e) {
+                _msg(e.toString().replaceAll('Exception: ', ''));
+              }
+            },
+            child: const Text('Add Balance', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+  void _sendPrize(Map u, {Map? match}) {
+    final amtC = TextEditingController(), noteC = TextEditingController(text: 'Winning Prize');
+    final uid = u['uid'].toString();
+    final eligible = match != null ? [match] : _matches.where((m) => m['players'] is Map && (m['players'] as Map).containsKey(uid)).toList();
+    if (eligible.isEmpty) return _msg('Is player ka joined match nahi mila; match roster se prize bhejein.');
+    String selectedId = eligible.first['id'].toString();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
+        title: Text('Send Prize to ${u['ign']}', style: const TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          DropdownButtonFormField<String>(
+            value: selectedId,
+            decoration: const InputDecoration(labelText: 'Select Match'),
+            items: eligible.map((m) => DropdownMenuItem<String>(value: m['id'].toString(), child: Text((m['title'] ?? 'Match').toString(), overflow: TextOverflow.ellipsis))).toList(),
+            onChanged: (v) { if (v != null) setDialogState(() => selectedId = v); },
+          ),
+          TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
+          TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Reason')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              final add = _num(amtC.text);
+              if (add <= 0) return _msg('Valid prize amount dalein.');
+              final chosen = eligible.firstWhere((m) => m['id'].toString() == selectedId);
+              Navigator.pop(ctx);
+              try {
+                final bal = _num(u['wallet']) + add;
+                await _saveTxn(uid, bal, noteC.text.trim(), 'SK ESPORTS Admin • ${chosen['title']}', add, 'CREDITED');
+                await _addMatchPrize(selectedId, chosen['title'].toString(), add);
+                _msg('₹$add prize player wallet mein credit aur match hisaab mein add ho gaya.');
+                await _sync();
+              } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
+            },
+            child: const Text('Send', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      )),
+    );
+  }
+  void _showPlayers(Map m) {
+    final pMap = m['players'] is Map ? m['players'] as Map : {};
+    final list = pMap.entries.toList();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Players (${list.length}/${m['slots']})', style: const TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: list.isEmpty
+              ? const Text('Abhi kisi ne join nahi kiya hai.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final uid = list[i].key.toString();
+                    final p = list[i].value is Map ? list[i].value as Map : {};
+                    final u = _users.firstWhere(
+                      (x) => x['uid'] == uid,
+                      orElse: () => {'uid': uid, 'ign': p['ign'] ?? 'Player', 'wallet': 0},
+                    );
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${i + 1}. ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Text('ID: ${p['bgmiId'] ?? '-'}', style: const TextStyle(fontSize: 12)),
+                      trailing: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _sendPrize(u, match: m);
+                        },
+                        child: const Text('Send Prize', style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
+    final showQuickActions = isAdmin;
+    final leadingItems = (showPromo ? 1 : 0) + (showQuickActions ? 1 : 0);
+    final pages = [
+      ListView.builder(
+        padding: const EdgeInsets.all(12),
+        itemCount: _matches.length + leadingItems,
+        itemBuilder: (_, i) {
+          if (showPromo && i == 0) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () async {
+                  final u = Uri.tryParse(_promoClickUrl);
+                  if (u != null && (u.scheme == 'https' || u.scheme == 'http')) {
+                    await launchUrl(u, mode: LaunchMode.externalApplication);
+                  }
+                },
+                child: Image.network(_promoImageUrl, height: 110, width: double.infinity, fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Padding(
+                    padding: EdgeInsets.all(16), child: Text('SK ESPORTS PROMO'),
+                  ),
+                ),
+              ),
+            );
+          }
+          final quickIndex = showPromo ? 1 : 0;
+          if (showQuickActions && i == quickIndex) return _adminQuickActions();
+          final m = _matches[i - leadingItems],
+              joined = m['isJoined'] == true,
+              isFull = _matchPlayerCount(m) >= _num(m['slots']),
+              closed = _matchClosed(m),
+              roomReady = _roomAvailable(m);
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Expanded(
+                    child: Text(
+                      '${m['title']} (${m['map']} • ${m['mode']})',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                  ),
+                  if (isAdmin)
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.redAccent),
+                      onPressed: () async {
+                        await http.delete(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'));
+                        _sync();
+                      },
+                    ),
+                ]),
+                Text(
+                  'Time: ${_smartMatchTime(m)} | Entry: ₹${m['fee']} | Kill: ₹${m['kill']} | Win: ₹${m['win']}',
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+                Text('Join: ${closed ? 'CLOSED' : 'OPEN'} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : 'WAITING UNTIL ${_timeLabel(m['roomReleaseAt'])}')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
+                if (joined || isAdmin) ...[
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    ElevatedButton(
+                      onPressed: (roomReady || isAdmin) ? () => _showRoomAfterAd(m) : null,
+                      child: const Text('View Room ID / Pass'),
+                    ),
+                    if (isAdmin) ...[
+                      IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
+                      IconButton(icon: const Icon(Icons.schedule, color: Colors.lightBlueAccent), onPressed: () => _editMatchTiming(m)),
+                      IconButton(icon: Icon(m['hold'] == true ? Icons.play_arrow : Icons.pause, color: Colors.amber), onPressed: () => _toggleMatchHold(m)),
+                    ],
+                  ]),
+                ],
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+
+                                       if (isAdmin)
+                        OutlinedButton(
+                          onPressed: () => _showPlayers(m),
+                          child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800))),
+                        ),
+
+                      Text('${_matchPlayerCount(m)}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey)),
+                  ElevatedButton( 
+
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
+                    ),
+                    onPressed: (joined || isFull || closed || isSuperAdmin) ? null : () => _startJoinAd(m),
+                    child: Text(
+                      joined ? 'JOINED ✓' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isSuperAdmin ? 'SUPER ADMIN' : 'Join ₹${m['fee']}'))),
+                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
+          );
+        },
+      ),
+      Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          Card(
+            child: ListTile(
+              title: const Text('Wallet Balance'),
+              trailing: Text(
+                '₹$_wallet',
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00E676)),
+              ),
+            ),
+          ),
+          Row(children: [
+            Expanded(
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+        onPressed: _deposit,
+                child: const Text('Add Money', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
+          ]),
+          const SizedBox(height: 10),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _txns.length,
+              itemBuilder: (_, i) => ListTile(
+                title: Text('${_txns[i]['title']}'),
+                subtitle: Text('${_txns[i]['sub']} • ${_txns[i]['status']}'),
+                trailing: Text('₹${_txns[i]['amt']}'),
+              ),
+            ),
+          ),
+        ]),
+      ),
+      ListView(padding: const EdgeInsets.all(16), children: [
+        Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
+        Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('RULES:\n$_rulesText'))),
+        ..._aboutLinks.map((link) => Padding(padding: const EdgeInsets.only(bottom: 7), child: OutlinedButton.icon(onPressed: () async { final uri = Uri.tryParse(link['url'].toString()); if (uri != null && !await launchUrl(uri, mode: LaunchMode.externalApplication)) { await Clipboard.setData(ClipboardData(text: link['url'].toString())); _msg('Link copied!'); } }, icon: const Icon(Icons.open_in_new), label: Text(link['label'].toString())))),
+                OutlinedButton(
+          onPressed: () async {
+            await (await SharedPreferences.getInstance()).clear();
+            if (!context.mounted) return;
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
+          },
+          child: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+        ),
+
+      ]),
+      _chatPage(),
+      if (isAdmin)
+        ListView(padding: const EdgeInsets.all(14), children: [
+          if (isSuperAdmin) ...[
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('CHANGE PAYMENT QR & UPI', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+                const SizedBox(height: 8),
+                TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
+                const SizedBox(height: 8),
+                TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
+                  onPressed: () async {
+                    _upiId = _upiC.text.trim();
+                    _qrUrl = _qrC.text.trim();
+                    await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
+                    _msg('New Payment QR Live!');
+                  },
+                  child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+              ]),
+            ),
+          ),
+          ],
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            icon: const Icon(Icons.add, color: Colors.black),
+            label: const Text('Create New Match', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            onPressed: _addMatch,
+          ),
+          if (isSuperAdmin) Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('ADSTERRA & PROMO SETTINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+                const SizedBox(height: 8),
+                TextField(controller: _joinAdUrlController, decoration: const InputDecoration(labelText: 'Join Ad Direct Link (10 sec)')),
+                const SizedBox(height: 8),
+                TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Room Ad Direct Link (5 sec)')),
+                const SizedBox(height: 8),
+                TextField(controller: _promoImageUrlController, decoration: const InputDecoration(labelText: 'Promo Image URL')),
+                const SizedBox(height: 8),
+                TextField(controller: _promoClickUrlController, decoration: const InputDecoration(labelText: 'Promo Click URL')),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Top Promo Banner ON / OFF'),
+                  value: _promoEnabled,
+                  onChanged: (v) => setState(() => _promoEnabled = v),
+                ),
+                ElevatedButton(
+                  onPressed: _saveAdAndPromoConfig,
+                  child: const Text('Save Ad & Promo Settings'),
+                ),
+                const Text('Dummy URL abhi example.com hai. Real Adsterra link baad mein yahin paste karein.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+              ]),
+            ),
+          ),
+          if (isSuperAdmin) ...[
+          _matchCollectionSection(),
+          _roleManagementCard(),
+          Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('ABOUT LINKS & RULES EDITOR', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)), const SizedBox(height: 6), const Text('Har line: Button Name | https://link', style: TextStyle(fontSize: 11, color: Colors.grey)), TextField(controller: _aboutLinksC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Social / Support Links', border: OutlineInputBorder())), const SizedBox(height: 8), TextField(controller: _rulesC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Rules (BGMI Level 30+ etc.)', border: OutlineInputBorder())), ElevatedButton(onPressed: _saveAboutRules, child: const Text('Save About & Rules'))]))),
+          ],
+          const SizedBox(height: 12),
+          const SizedBox(height: 12),
+          if (isSuperAdmin) ...[
+          TextButton.icon(
+            onPressed: _showHistory,
+            icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
+            label: const Text('All Players History', style: TextStyle(color: Color(0xFFFF9800))),
+          ),
+          ],
+
+    ]),
+]; 
+    final navPages = isAdmin
+        ? [pages[0], pages[1], pages[3], pages[4], pages[2]]
+        : [pages[0], pages[1], pages[3], pages[2]];
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('SK ESPORTS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _sync),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Text(
+                '₹$_wallet',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 16),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: _loading ? const Center(child: CircularProgressIndicator()) : navPages[_tab],
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _tab,
+        selectedItemColor: const Color(0xFFFF9800),
+        onTap: (i) => setState(() => _tab = i),
+        items: [
+          const BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
+          const BottomNavigationBarItem(icon: Icon(Icons.wallet), label: 'Wallet'),
+          const BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
+          if (isAdmin) const BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
+          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+        ],
+      ),
+    );
+  }
+}
+).hasMatch(idC.text.trim())) {
+                return _msg('Sahi IGN aur BGMI ID dalein (10 se 11 digits)!');
               }
               if (_matchClosed(m) || _num(m['joined']) >= _num(m['slots'])) { Navigator.pop(ctx); return _msg('Join band ho chuka hai ya slots full hain.'); }
               final fee = _num(m['fee']);
