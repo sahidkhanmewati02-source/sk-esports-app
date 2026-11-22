@@ -387,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
-  String _dateTimeInput(DateTime d) => '\${d.year.toString().padLeft(4, '0')}-\${d.month.toString().padLeft(2, '0')}-\${d.day.toString().padLeft(2, '0')} \${d.hour.toString().padLeft(2, '0')}:\${d.minute.toString().padLeft(2, '0')}';
+  String _dateTimeInput(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   Future<void> _pickDateTime(TextEditingController c) async {
     final now = DateTime.now();
     final seed = DateTime.tryParse(c.text.trim().replaceFirst(' ', 'T')) ?? now.add(const Duration(hours: 1));
@@ -405,9 +405,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final diff = date.difference(today).inDays;
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const weekdays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-    final day = diff == 0 ? 'Today' : (diff == 1 ? 'Tomorrow' : '\${weekdays[d.weekday - 1]}, \${d.day}');
+    final day = diff == 0 ? 'Today' : (diff == 1 ? 'Tomorrow' : '${weekdays[d.weekday - 1]}, ${d.day}');
     final hour = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    return '\$day, \${d.day} \${months[d.month - 1]} • \${hour.toString().padLeft(2, '0')}:\${d.minute.toString().padLeft(2, '0')} \${d.hour >= 12 ? 'PM' : 'AM'}';
+    return '$day, ${d.day} ${months[d.month - 1]} • ${hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')} ${d.hour >= 12 ? 'PM' : 'AM'}';
   }
 
   bool _matchClosed(Map m) { final c = _num(m['closeAt']); return m['status'] == 'CLOSED' || (c > 0 && _clock.millisecondsSinceEpoch >= c); }
