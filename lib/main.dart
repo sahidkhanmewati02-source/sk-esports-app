@@ -733,6 +733,7 @@ class _HomeScreenState extends State<HomeScreen> {
             return q.isEmpty || ign.contains(q) || email.contains(q) || bgmiId.contains(q);
           }).toList();
           return AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
             title: Text('All Players (${_users.length})', style: const TextStyle(fontSize: 16)),
             content: SizedBox(
               width: double.maxFinite,
@@ -756,28 +757,89 @@ class _HomeScreenState extends State<HomeScreen> {
                             itemCount: filtered.length,
                             itemBuilder: (_, i) {
                               final u = filtered[i];
+                              final ign = (u['ign'] ?? 'Player').toString();
+                              final wallet = _num(u['wallet']);
                               return Card(
-                                child: ListTile(
-                                  dense: true,
-                                  title: Text('${u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  subtitle: Text('${u['email'] ?? '-'}\nBGMI ID: ${u['bgmiId'] ?? '-'}'),
-                                  trailing: Wrap(
-                                    spacing: 0,
+                                margin: const EdgeInsets.only(bottom: 8),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      IconButton(
-                                        tooltip: 'Add Wallet Balance',
-                                        icon: const Icon(Icons.add_circle, color: Color(0xFF00E676), size: 22),
-                                        onPressed: () => _addManualBalance(u),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              ign,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            '₹$wallet',
+                                            textAlign: TextAlign.right,
+                                            style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                        ],
                                       ),
-                                      IconButton(
-                                        tooltip: 'History',
-                                        icon: const Icon(Icons.history, color: Colors.lightBlueAccent),
-                                        onPressed: () => _showHistory(u),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        (u['email'] ?? '-').toString(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 12, color: Colors.white70),
                                       ),
-                                      IconButton(
-                                        tooltip: 'Send Prize (joined match)',
-                                        icon: const Icon(Icons.emoji_events, color: Color(0xFFFF9800)),
-                                        onPressed: () => _sendPrize(u),
+                                      Text(
+                                        'BGMI ID: ${u['bgmiId'] ?? '-'}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 12, color: Colors.white70),
+                                      ),
+                                      const SizedBox(height: 7),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextButton.icon(
+                                              style: TextButton.styleFrom(
+                                                foregroundColor: const Color(0xFF00E676),
+                                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+                                                visualDensity: VisualDensity.compact,
+                                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              ),
+                                              icon: const Icon(Icons.add_circle, size: 16),
+                                              label: const Text('Add Balance', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11)),
+                                              onPressed: () => _addManualBalance(u),
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: TextButton.icon(
+                                              style: TextButton.styleFrom(
+                                                foregroundColor: Colors.lightBlueAccent,
+                                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+                                                visualDensity: VisualDensity.compact,
+                                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              ),
+                                              icon: const Icon(Icons.history, size: 16),
+                                              label: const Text('History', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11)),
+                                              onPressed: () => _showHistory(u),
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: TextButton.icon(
+                                              style: TextButton.styleFrom(
+                                                foregroundColor: const Color(0xFFFF9800),
+                                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+                                                visualDensity: VisualDensity.compact,
+                                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              ),
+                                              icon: const Icon(Icons.emoji_events, size: 16),
+                                              label: const Text('Prize', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11)),
+                                              onPressed: () => _sendPrize(u),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),
