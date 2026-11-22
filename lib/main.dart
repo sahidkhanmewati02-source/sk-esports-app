@@ -482,10 +482,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Padding(padding: EdgeInsets.fromLTRB(4, 8, 4, 4), child: Text('MATCH-WISE COLLECTION & PROFIT', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold, fontSize: 15))),
       if (open.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Abhi koi active match hisaab nahi hai.'))),
-      ...open.map(tile),
+      ...open.map((a) => tile(a as Map)),
       if (settled.isNotEmpty) ...[
         const Padding(padding: EdgeInsets.fromLTRB(4, 14, 4, 4), child: Text('SETTLED MATCH HISTORY', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
-        ...settled.map(tile),
+        ...settled.map((a) => tile(a as Map)),
       ],
     ]);
   }
