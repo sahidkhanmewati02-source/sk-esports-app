@@ -1132,9 +1132,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
                     ),
-                    onPressed: (joined || isFull || closed || isAdmin) ? null : () => _startJoinAd(m),
+                    onPressed: (joined || isFull || closed || isSuperAdmin) ? null : () => _startJoinAd(m),
                     child: Text(
-                      joined ? 'JOINED ✓' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isAdmin ? 'ADMIN' : 'Join ₹${m['fee']}'))),
+                      joined ? 'JOINED ✓' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isSuperAdmin ? 'SUPER ADMIN' : 'Join ₹${m['fee']}'))),
                       style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                     ),
                   ),
