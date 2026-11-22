@@ -341,6 +341,80 @@ class _HomeScreenState extends State<HomeScreen> {
     await http.patch(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'), body: jsonEncode({'wallet': bal}));
     await http.post(Uri.parse('$kDbUrl/users/$uid/txns.json?auth=${widget.token}'), body: jsonEncode(t));
   }
+  void _showAllPlayersDialog() {
+    final searchC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final q = searchC.text.trim().toLowerCase();
+          final filtered = _users.where((u) {
+            final ign = '${u['ign'] ?? ''}'.toLowerCase();
+            final email = '${u['email'] ?? ''}'.toLowerCase();
+            final bgmiId = '${u['bgmiId'] ?? ''}'.toLowerCase();
+            return q.isEmpty || ign.contains(q) || email.contains(q) || bgmiId.contains(q);
+          }).toList();
+          return AlertDialog(
+            title: Text('All Players (${_users.length})', style: const TextStyle(fontSize: 16)),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 420,
+              child: Column(
+                children: [
+                  TextField(
+                    controller: searchC,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Search Name, Email or BGMI ID',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? const Center(child: Text('Koi player nahi mila'))
+                        : ListView.builder(
+                            itemCount: filtered.length,
+                            itemBuilder: (_, i) {
+                              final u = filtered[i];
+                              return Card(
+                                child: ListTile(
+                                  dense: true,
+                                  title: Text('${u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  subtitle: Text('${u['email'] ?? '-'}\nBGMI ID: ${u['bgmiId'] ?? '-'}'),
+                                  trailing: Wrap(
+                                    spacing: 0,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'History',
+                                        icon: const Icon(Icons.history, color: Colors.lightBlueAccent),
+                                        onPressed: () => _showHistory(u),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Send Prize',
+                                        icon: const Icon(Icons.emoji_events, color: Color(0xFFFF9800)),
+                                        onPressed: () => _sendPrize(u),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
         void _showHistory([Map? player]) {
     final list = [];
     final target = player == null ? _users : [player];
@@ -1145,30 +1219,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
 
           const SizedBox(height: 12),
-                  Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('PLAYERS (History & Prize)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
-            TextButton.icon(
-              onPressed: () => _showHistory(),
-              icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
-              label: const Text('All History', style: TextStyle(color: Color(0xFFFF9800))),
-            ),
-          ],
-        ),
-        ..._users.map((u) => Card(
-              child: ListTile(
-                title: Text('${u['ign']} (₹${u['wallet']})'),
-                subtitle: Text('${u['email']} • ID: ${u['bgmiId']}'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(icon: const Icon(Icons.history, color: Colors.lightBlueAccent), onPressed: () => _showHistory(u)),
-                    IconButton(icon: const Icon(Icons.emoji_events, color: Color(0xFFFF9800)), onPressed: () => _sendPrize(u)),
-                  ],
-                ),
+          Card(
+            child: ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Color(0x22FF9800),
+                child: Icon(Icons.groups, color: Color(0xFFFF9800)),
               ),
-            )),
+              title: const Text('All Players', style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('${_users.length} registered players'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: _showAllPlayersDialog,
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _showHistory,
+            icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
+            label: const Text('All Players History', style: TextStyle(color: Color(0xFFFF9800))),
+          ),
 
     ]),
 ]; 
