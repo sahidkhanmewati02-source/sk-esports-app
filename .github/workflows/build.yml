@@ -2,7 +2,7 @@ name: Build SK ESPORTS APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, mega-update-v1 ]
 
 jobs:
   build:
