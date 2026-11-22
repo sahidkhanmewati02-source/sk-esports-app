@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -218,6 +219,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _promoImageUrl = '', _promoClickUrl = '';
   bool _promoEnabled = false;
   bool _loading = true;
+  String _superAdminUid = '';
+  DateTime _clock = DateTime.now();
+  Timer? _matchTicker;
   List _matches = [], _txns = [], _deps = [], _withs = [], _users = [];
   final _upiC = TextEditingController(), _qrC = TextEditingController();
   final _joinAdUrlController = TextEditingController(text: 'https://example.com');
@@ -228,7 +232,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _matchTicker = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() => _clock = DateTime.now()); });
     _sync();
+  }
+
+  @override
+  void dispose() {
+    _matchTicker?.cancel();
+    _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose();
+    super.dispose();
   }
 
   void _msg(String s) =>
@@ -248,10 +260,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _promoImageUrl = c['promoImageUrl'] ?? '';
         _promoClickUrl = c['promoClickUrl'] ?? '';
         _promoEnabled = c['promoEnabled'] == true;
+        _superAdminUid = '${c['superAdminUid'] ?? ''}';
         _joinAdUrlController.text = _joinAdUrl;
         _roomAdUrlController.text = _roomAdUrl;
         _promoImageUrlController.text = _promoImageUrl;
         _promoClickUrlController.text = _promoClickUrl;
+      }
+      if (isAdmin) {
+        _superAdminUid = widget.uid;
+        await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'superAdminUid': widget.uid}));
       }
       _upiC.text = _upiId;
       _qrC.text = _qrUrl;
@@ -338,8 +355,36 @@ class _HomeScreenState extends State<HomeScreen> {
     final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     final t = {'title': title, 'sub': '$sub • $dt', 'amt': amt, 'status': status, 'time': dt};
     if (uid == widget.uid) setState(() => _txns.insert(0, t));
-    await http.patch(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'), body: jsonEncode({'wallet': bal}));
-    await http.post(Uri.parse('$kDbUrl/users/$uid/txns.json?auth=${widget.token}'), body: jsonEncode(t));
+    final walletRes = await http.patch(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'), body: jsonEncode({'wallet': bal}));
+    if (walletRes.statusCode < 200 || walletRes.statusCode >= 300) throw Exception('Wallet update failed (${walletRes.statusCode}). Firebase Rules check karein.');
+    final txnRes = await http.post(Uri.parse('$kDbUrl/users/$uid/txns.json?auth=${widget.token}'), body: jsonEncode(t));
+    if (txnRes.statusCode < 200 || txnRes.statusCode >= 300) throw Exception('Transaction history save nahi hui (${txnRes.statusCode}).');
+  }
+
+  bool _matchClosed(Map m) { final c = _num(m['closeAt']); return m['status'] == 'CLOSED' || (c > 0 && _clock.millisecondsSinceEpoch >= c); }
+  bool _roomAvailable(Map m) { final r = _num(m['roomReleaseAt']); return m['hold'] != true && (r <= 0 || _clock.millisecondsSinceEpoch >= r); }
+  String _timeLabel(dynamic raw) { final ms = _num(raw); if (ms <= 0) return 'Not set'; final d = DateTime.fromMillisecondsSinceEpoch(ms); return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}'; }
+
+  void _editMatchTiming(Map m) {
+    String fmt(int ms) { final d = DateTime.fromMillisecondsSinceEpoch(ms); return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}'; }
+    final now = DateTime.now();
+    final startC = TextEditingController(text: fmt(_num(m['startAt']) > 0 ? _num(m['startAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch));
+    final closeC = TextEditingController(text: fmt(_num(m['closeAt']) > 0 ? _num(m['closeAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch));
+    final roomC = TextEditingController(text: fmt(_num(m['roomReleaseAt']) > 0 ? _num(m['roomReleaseAt']) : now.add(const Duration(minutes: 45)).millisecondsSinceEpoch));
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Match Timer & Room Release'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [TextField(controller: startC, decoration: const InputDecoration(labelText: 'Match start (YYYY-MM-DD HH:MM)')), TextField(controller: closeC, decoration: const InputDecoration(labelText: 'Join auto-close (YYYY-MM-DD HH:MM)')), TextField(controller: roomC, decoration: const InputDecoration(labelText: 'Room ID release (YYYY-MM-DD HH:MM)')), const Text('24-hour local time format use karein.', style: TextStyle(fontSize: 11, color: Colors.grey))])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), ElevatedButton(onPressed: () async {
+      DateTime? parse(String v) => DateTime.tryParse(v.trim().replaceFirst(' ', 'T'));
+      final st = parse(startC.text), cl = parse(closeC.text), rm = parse(roomC.text);
+      if (st == null || cl == null || rm == null) return _msg('Date/time format sahi dalein.');
+      final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': cl.millisecondsSinceEpoch, 'roomReleaseAt': rm.millisecondsSinceEpoch, 'time': fmt(st.millisecondsSinceEpoch)};
+      final res = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode(data));
+      if (res.statusCode >= 200 && res.statusCode < 300) { m.addAll(data); if (mounted) setState(() {}); Navigator.pop(ctx); _msg('Match timer update ho gaya.'); } else { _msg('Timer save nahi hua. Firebase Rules check karein.'); }
+    }, child: const Text('Save Timer'))]));
+  }
+
+  Future<void> _toggleMatchHold(Map m) async {
+    final hold = m['hold'] != true;
+    final res = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'hold': hold}));
+    if (res.statusCode >= 200 && res.statusCode < 300) { setState(() => m['hold'] = hold); _msg(hold ? 'Match HOLD par hai; room release ruk gaya.' : 'Match resume kar diya.'); } else { _msg('Hold status save nahi hua.'); }
   }
   void _showAllPlayersDialog() {
     final searchC = TextEditingController();
@@ -550,26 +595,38 @@ class _HomeScreenState extends State<HomeScreen> {
               if (ignC.text.trim().isEmpty || !RegExp(r'^\d{8,}$').hasMatch(idC.text.trim())) {
                 return _msg('Sahi IGN aur ID dalein!');
               }
+              if (_matchClosed(m) || _num(m['joined']) >= _num(m['slots'])) { Navigator.pop(ctx); return _msg('Join band ho chuka hai ya slots full hain.'); }
               final fee = _num(m['fee']);
               if ((_wallet - fee).isNegative) {
                 Navigator.pop(ctx);
                 setState(() => _tab = 1);
                 return _msg('Balance kam hai!');
               }
+              if (_superAdminUid.isEmpty) { Navigator.pop(ctx); return _msg('Super Admin wallet setup nahi hua. Admin ek baar app open karke refresh karein.'); }
               final j = _num(m['joined']) + 1;
-              setState(() {
-                _ign = ignC.text.trim();
-                _bgmiId = idC.text.trim();
-                _wallet = _wallet - fee;
-                m['joined'] = j;
-                m['isJoined'] = true;
-              });
+              final oldBalance = _wallet;
               Navigator.pop(ctx);
-              await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': _ign, 'bgmiId': _bgmiId}));
-              await _saveTxn(widget.uid, _wallet, 'Joined: ${m['title']}', 'IGN: $_ign', fee, 'PAID');
-              await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'joined': j}));
-              await http.put(Uri.parse('$kDbUrl/matches/${m['id']}/players/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': _ign, 'bgmiId': _bgmiId}));
-              _msg('Slot Confirmed!');
+              try {
+                final aRes = await http.get(Uri.parse('$kDbUrl/users/$_superAdminUid.json?auth=${widget.token}'));
+                if (aRes.statusCode != 200 || aRes.body == 'null') throw Exception('Super Admin wallet read nahi hua.');
+                final aData = jsonDecode(aRes.body) as Map;
+                final aBalance = _num(aData['wallet']);
+                final playerBalance = oldBalance - fee;
+                final pRes = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': playerBalance, 'ign': ignC.text.trim(), 'bgmiId': idC.text.trim()}));
+                if (pRes.statusCode < 200 || pRes.statusCode >= 300) throw Exception('Player wallet update fail hua.');
+                final cRes = await http.patch(Uri.parse('$kDbUrl/users/$_superAdminUid.json?auth=${widget.token}'), body: jsonEncode({'wallet': aBalance + fee}));
+                if (cRes.statusCode < 200 || cRes.statusCode >= 300) {
+                  await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': oldBalance}));
+                  throw Exception('Super Admin wallet credit fail hua; player fee refund kar di gayi.');
+                }
+                await _saveTxn(widget.uid, playerBalance, 'Joined: ${m['title']}', 'Entry fee paid to SK ESPORTS', fee, 'PAID');
+                await _saveTxn(_superAdminUid, aBalance + fee, 'Entry Fee Received', '${ignC.text.trim()} • ${m['title']}', fee, 'CREDITED');
+                final mr = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'joined': j}));
+                final pr = await http.put(Uri.parse('$kDbUrl/matches/${m['id']}/players/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': ignC.text.trim(), 'bgmiId': idC.text.trim(), 'joinedAt': DateTime.now().millisecondsSinceEpoch, 'feePaid': fee}));
+                if (mr.statusCode < 200 || mr.statusCode >= 300 || pr.statusCode < 200 || pr.statusCode >= 300) throw Exception('Fee transfer ho gayi, par match registration save nahi hui. Dobara payment na karein; Admin se contact karein.');
+                if (mounted) setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = playerBalance; m['joined'] = j; m['isJoined'] = true; });
+                _msg('Slot Confirmed! Entry fee Super Admin wallet mein credit ho gayi.');
+              } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
             },
             child: Text('Pay ₹${m['fee']}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
@@ -752,7 +809,10 @@ class _HomeScreenState extends State<HomeScreen> {
         timeC = TextEditingController(text: 'Today, 08:30 PM'),
         feeC = TextEditingController(text: '30'),
         killC = TextEditingController(text: '20'),
-        winC = TextEditingController(text: '175');
+        winC = TextEditingController(text: '175'),
+        startC = TextEditingController(text: DateTime.now().add(const Duration(hours: 1)).toIso8601String().substring(0, 16).replaceFirst('T', ' ')),
+        closeC = TextEditingController(text: DateTime.now().add(const Duration(hours: 1)).toIso8601String().substring(0, 16).replaceFirst('T', ' ')),
+        roomC = TextEditingController(text: DateTime.now().add(const Duration(minutes: 45)).toIso8601String().substring(0, 16).replaceFirst('T', ' '));
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -762,7 +822,10 @@ class _HomeScreenState extends State<HomeScreen> {
             TextField(controller: tC, decoration: const InputDecoration(labelText: 'Title')),
             TextField(controller: mapC, decoration: const InputDecoration(labelText: 'Map (Erangel/Miramar/Vikendi/Livik)')),
             TextField(controller: modeC, decoration: const InputDecoration(labelText: 'Mode (SOLO/SQUAD)')),
-            TextField(controller: timeC, decoration: const InputDecoration(labelText: 'Time')),
+            TextField(controller: timeC, decoration: const InputDecoration(labelText: 'Time / Display label')),
+            TextField(controller: startC, decoration: const InputDecoration(labelText: 'Start (YYYY-MM-DD HH:MM)')),
+            TextField(controller: closeC, decoration: const InputDecoration(labelText: 'Join auto-close (YYYY-MM-DD HH:MM)')),
+            TextField(controller: roomC, decoration: const InputDecoration(labelText: 'Room release (YYYY-MM-DD HH:MM)')),
             TextField(controller: feeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry Fee')),
             TextField(controller: killC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per Kill')),
             TextField(controller: winC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Chicken Dinner Prize')),
@@ -774,6 +837,9 @@ class _HomeScreenState extends State<HomeScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () async {
               if (tC.text.trim().isEmpty) return;
+              DateTime? parseTime(String v) => DateTime.tryParse(v.trim().replaceFirst(' ', 'T'));
+              final st = parseTime(startC.text), cl = parseTime(closeC.text), rm = parseTime(roomC.text);
+              if (st == null || cl == null || rm == null) return _msg('Timer date/time format sahi dalein.');
               Navigator.pop(ctx);
               await http.post(
                 Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'),
@@ -781,7 +847,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   'title': tC.text.trim(),
                   'map': mapC.text.trim(),
                   'mode': modeC.text.trim(),
-                  'time': timeC.text.trim(),
+                  'time': timeC.text.trim().isEmpty ? startC.text.trim() : timeC.text.trim(),
+                  'startAt': st.millisecondsSinceEpoch,
+                  'closeAt': cl.millisecondsSinceEpoch,
+                  'roomReleaseAt': rm.millisecondsSinceEpoch,
+                  'hold': false,
+                  'status': 'OPEN',
                   'fee': _num(feeC.text),
                   'kill': _num(killC.text),
                   'win': _num(winC.text),
@@ -901,7 +972,9 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           final m = _matches[i - (_promoEnabled && _promoImageUrl.isNotEmpty ? 1 : 0)],
               joined = m['isJoined'] == true,
-              isFull = _num(m['joined']) >= _num(m['slots']);
+              isFull = _num(m['joined']) >= _num(m['slots']),
+              closed = _matchClosed(m),
+              roomReady = _roomAvailable(m);
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
             child: Padding(
@@ -927,18 +1000,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   'Time: ${m['time']} | Entry: ₹${m['fee']} | Kill: ₹${m['kill']} | Win: ₹${m['win']}',
                   style: const TextStyle(color: Colors.grey, fontSize: 12),
                 ),
+                Text('Join: ${closed ? 'CLOSED' : 'OPEN'} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : 'WAITING UNTIL ${_timeLabel(m['roomReleaseAt'])}')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
                 if (joined || isAdmin) ...[
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     ElevatedButton(
-                      onPressed: () => _showRoomAfterAd(m),
+                      onPressed: (roomReady || isAdmin) ? () => _showRoomAfterAd(m) : null,
                       child: const Text('View Room ID / Pass'),
                     ),
-                    if (isAdmin)
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Color(0xFFFF9800)),
-                        onPressed: () => _editRoom(m),
-                      ),
+                    if (isAdmin) ...[
+                      IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
+                      IconButton(icon: const Icon(Icons.schedule, color: Colors.lightBlueAccent), onPressed: () => _editMatchTiming(m)),
+                      IconButton(icon: Icon(m['hold'] == true ? Icons.play_arrow : Icons.pause, color: Colors.amber), onPressed: () => _toggleMatchHold(m)),
+                    ],
                   ]),
                 ],
                 const SizedBox(height: 8),
@@ -956,9 +1030,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
                     ),
-                    onPressed: (joined || isFull) ? null : () => _startJoinAd(m),
+                    onPressed: (joined || isFull || closed || isAdmin) ? null : () => _startJoinAd(m),
                     child: Text(
-                      joined ? 'JOINED ✓' : (isFull ? 'FULL' : 'Join ₹${m['fee']}'),
+                      joined ? 'JOINED ✓' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isAdmin ? 'ADMIN' : 'Join ₹${m['fee']}'))),
                       style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                     ),
                   ),
