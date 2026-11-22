@@ -976,7 +976,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () async {
                     _upiId = _upiC.text.trim();
                     _qrUrl = _qrC.text.trim();
-                    await http.put(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
+                    await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
                     _msg('New Payment QR Live!');
                   },
                   child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
