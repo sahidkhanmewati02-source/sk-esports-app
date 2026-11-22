@@ -1259,6 +1259,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Card(child: ListTile(leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E676)), title: const Text('Private Super Admin Wallet'), subtitle: const Text('Sirf Super Admin ko visible'), trailing: Text('₹$_wallet', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 18)))),
           _roleManagementCard(),
           Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('ABOUT LINKS & RULES EDITOR', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)), const SizedBox(height: 6), const Text('Har line: Button Name | https://link', style: TextStyle(fontSize: 11, color: Colors.grey)), TextField(controller: _aboutLinksC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Social / Support Links', border: OutlineInputBorder())), const SizedBox(height: 8), TextField(controller: _rulesC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Rules (BGMI Level 30+ etc.)', border: OutlineInputBorder())), ElevatedButton(onPressed: _saveAboutRules, child: const Text('Save About & Rules'))]))),
+          ],
           const SizedBox(height: 12),
           Card(
           child: ListTile(
@@ -1387,6 +1388,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 
           const SizedBox(height: 12),
+          if (isSuperAdmin) ...[
           Card(
             child: ListTile(
               leading: const CircleAvatar(
