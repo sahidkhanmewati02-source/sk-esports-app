@@ -251,6 +251,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void _msg(String s) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
   int _num(dynamic v) => int.tryParse('$v') ?? 0;
+  int _matchPlayerCount(Map m) {
+    final players = m['players'];
+    if (players is Map) return players.length;
+    if (players is List) return players.length;
+    return 0;
+  }
 
   Future _sync() async {
     setState(() => _loading = true);
@@ -1292,7 +1298,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (showQuickActions && i == quickIndex) return _adminQuickActions();
           final m = _matches[i - leadingItems],
               joined = m['isJoined'] == true,
-              isFull = _num(m['joined']) >= _num(m['slots']),
+              isFull = _matchPlayerCount(m) >= _num(m['slots']),
               closed = _matchClosed(m),
               roomReady = _roomAvailable(m);
           return Card(
@@ -1344,7 +1350,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800))),
                         ),
 
-                      Text('${m['joined']}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey)),
+                      Text('${_matchPlayerCount(m)}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey)),
                   ElevatedButton( 
 
                     style: ElevatedButton.styleFrom(
@@ -1479,146 +1485,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('ABOUT LINKS & RULES EDITOR', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)), const SizedBox(height: 6), const Text('Har line: Button Name | https://link', style: TextStyle(fontSize: 11, color: Colors.grey)), TextField(controller: _aboutLinksC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Social / Support Links', border: OutlineInputBorder())), const SizedBox(height: 8), TextField(controller: _rulesC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Rules (BGMI Level 30+ etc.)', border: OutlineInputBorder())), ElevatedButton(onPressed: _saveAboutRules, child: const Text('Save About & Rules'))]))),
           ],
           const SizedBox(height: 12),
-          Card(
-          child: ListTile(
-            leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E676)),
-            title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('Tap karke Approve / Reject karein', style: TextStyle(fontSize: 12)),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontSize: 15)),
-                content: SizedBox(
-                  width: double.maxFinite,
-                  height: 350,
-                  child: _deps.isEmpty
-                      ? const Center(child: Text('Koi pending deposit nahi hai'))
-                      : ListView.builder(
-                          itemCount: _deps.length,
-                          itemBuilder: (_, i) {
-                            final d = _deps[i];
-                            return Card(
-                              child: ListTile(
-                                title: Text('${d['ign']} • ₹${d['amt']}'),
-                                subtitle: Text('UTR: ${d['utr']}'),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)),
-                                      onPressed: () async {
-                                        Navigator.pop(ctx);
-                                        final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => {});
-                                        if (u.isNotEmpty) {
-                                          await _saveTxn('${d['uid']}', _num(u['wallet']) + _num(d['amt']), 'Wallet Deposit', 'UTR: ${d['utr']}', _num(d['amt']), 'APPROVED');
-                                        }
-                                        await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'APPROVED'}));
-                                        _msg('Approved!');
-                                        _sync();
-                                      },
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.cancel, color: Colors.redAccent),
-                                      onPressed: () async {
-                                        Navigator.pop(ctx);
-                                        await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'}));
-                                        _sync();
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-                actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-              ),
-            ),
-          ),
-        ),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.payments, color: Color(0xFFFF9800)),
-            title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('Tap karke UPI copy aur Paid mark karein', style: TextStyle(fontSize: 12)),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontSize: 15)),
-                content: SizedBox(
-                  width: double.maxFinite,
-                  height: 350,
-                  child: _withs.isEmpty
-                      ? const Center(child: Text('Koi pending withdrawal nahi hai'))
-                      : ListView.builder(
-                          itemCount: _withs.length,
-                          itemBuilder: (_, i) {
-                            final wd = _withs[i];
-                            return Card(
-                              child: ListTile(
-                                title: Text('${wd['ign']} • ₹${wd['amt']}'),
-                                subtitle: Text('UPI: ${wd['upi']}'),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.copy, color: Colors.lightBlueAccent),
-                                      onPressed: () {
-                                        Clipboard.setData(ClipboardData(text: '${wd['upi']}'));
-                                        _msg('Player UPI Copied!');
-                                      },
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)),
-                                      onPressed: () async {
-                                        Navigator.pop(ctx);
-                                        await http.patch(Uri.parse('$kDbUrl/withdrawals/${wd['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'PAID'}));
-                                        final tRes = await http.get(Uri.parse('$kDbUrl/users/${wd['uid']}/txns.json?auth=${widget.token}'));
-                                        if (tRes.statusCode == 200 && tRes.body != 'null') {
-                                          final tMap = jsonDecode(tRes.body) as Map<String, dynamic>;
-                                          for (final e in tMap.entries.toList().reversed) {
-
-                                            if (e.value is Map && e.value['title'] == 'UPI Withdrawal' && e.value['status'] == 'PENDING' && _num(e.value['amt']) == _num(wd['amt'])) {
-                                              await http.patch(Uri.parse('$kDbUrl/users/${wd['uid']}/txns/${e.key}.json?auth=${widget.token}'), body: jsonEncode({'status': 'SUCCESS'}));
-                                              break;
-                                            }
-                                          }
-                                        }
-                                        _msg('Marked as Paid!');
-                                        _sync();
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-                actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-              ),
-            ),
-          ),
-        ),
-
-
           const SizedBox(height: 12),
           if (isSuperAdmin) ...[
-          Card(
-            child: ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Color(0x22FF9800),
-                child: Icon(Icons.groups, color: Color(0xFFFF9800)),
-              ),
-              title: const Text('All Players', style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('${_users.length} registered players'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: _showAllPlayersDialog,
-            ),
-          ),
           TextButton.icon(
             onPressed: _showHistory,
             icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
