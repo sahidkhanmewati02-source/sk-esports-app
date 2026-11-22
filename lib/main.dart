@@ -214,9 +214,16 @@ class _HomeScreenState extends State<HomeScreen> {
   bool get isAdmin => widget.email.toLowerCase() == kAdmin.toLowerCase();
   int _tab = 0, _wallet = 0;
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
+  String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
+  String _promoImageUrl = '', _promoClickUrl = '';
+  bool _promoEnabled = false;
   bool _loading = true;
   List _matches = [], _txns = [], _deps = [], _withs = [], _users = [];
   final _upiC = TextEditingController(), _qrC = TextEditingController();
+  final _joinAdUrlController = TextEditingController(text: 'https://example.com');
+  final _roomAdUrlController = TextEditingController(text: 'https://example.com');
+  final _promoImageUrlController = TextEditingController();
+  final _promoClickUrlController = TextEditingController();
 
   @override
   void initState() {
@@ -236,6 +243,15 @@ class _HomeScreenState extends State<HomeScreen> {
         final c = jsonDecode(cRes.body);
         _upiId = c['upiId'] ?? 'skesports@upi';
         _qrUrl = c['qrUrl'] ?? '';
+        _joinAdUrl = c['joinAdUrl'] ?? 'https://example.com';
+        _roomAdUrl = c['roomAdUrl'] ?? 'https://example.com';
+        _promoImageUrl = c['promoImageUrl'] ?? '';
+        _promoClickUrl = c['promoClickUrl'] ?? '';
+        _promoEnabled = c['promoEnabled'] == true;
+        _joinAdUrlController.text = _joinAdUrl;
+        _roomAdUrlController.text = _roomAdUrl;
+        _promoImageUrlController.text = _promoImageUrl;
+        _promoClickUrlController.text = _promoClickUrl;
       }
       _upiC.text = _upiId;
       _qrC.text = _qrUrl;
@@ -362,6 +378,81 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+
+  Future<void> _showTimedAd({required String title, required String url, required int seconds, required VoidCallback onContinue}) async {
+    var remaining = seconds;
+    var finished = false;
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) {
+          if (!finished && remaining == seconds) {
+            Future.doWhile(() async {
+              await Future.delayed(const Duration(seconds: 1));
+              if (!ctx.mounted || finished) return false;
+              setS(() => remaining--);
+              if (remaining <= 0) { finished = true; setS(() {}); return false; }
+              return true;
+            });
+          }
+          return AlertDialog(
+            title: Text(title),
+            content: Text(finished ? 'Continue karne ke liye button dabayein.' : 'Please wait $remaining seconds...'),
+            actions: [
+              ElevatedButton(
+                onPressed: finished ? () async {
+                  Navigator.pop(ctx);
+                  final uri = Uri.tryParse(url);
+                  if (uri != null && (uri.scheme == 'https' || uri.scheme == 'http')) {
+                    try { await launchUrl(uri, mode: LaunchMode.externalApplication); } catch (_) {}
+                  }
+                  onContinue();
+                } : null,
+                child: const Text('Continue'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _startJoinAd(Map m) {
+    _showTimedAd(title: 'Sponsored Link', url: _joinAdUrl, seconds: 10, onContinue: () => _join(m));
+  }
+
+  void _showRoomAfterAd(Map m) {
+    _showTimedAd(title: 'Room Details', url: _roomAdUrl, seconds: 5, onContinue: () {
+      if (!mounted) return;
+      showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Match Room Details'),
+        content: SelectableText('Room ID: ${m['rId']}\\nPassword: ${m['rPass']}'),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ));
+    });
+  }
+
+  void _saveAdAndPromoConfig() async {
+    _joinAdUrl = _joinAdUrlController.text.trim();
+    _roomAdUrl = _roomAdUrlController.text.trim();
+    _promoImageUrl = _promoImageUrlController.text.trim();
+    _promoClickUrl = _promoClickUrlController.text.trim();
+    final data = {
+      'joinAdUrl': _joinAdUrl,
+      'roomAdUrl': _roomAdUrl,
+      'promoImageUrl': _promoImageUrl,
+      'promoClickUrl': _promoClickUrl,
+      'promoEnabled': _promoEnabled,
+    };
+    final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode(data));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      _msg('Ad & Promo settings saved!');
+      if (mounted) setState(() {});
+    } else {
+      _msg('Settings save nahi hui. Firebase permission check karein.');
+    }
+  }
 
   void _join(Map m) {
     final ignC = TextEditingController(text: _ign),
@@ -713,9 +804,28 @@ class _HomeScreenState extends State<HomeScreen> {
     final pages = [
       ListView.builder(
         padding: const EdgeInsets.all(12),
-        itemCount: _matches.length,
+        itemCount: _matches.length + (_promoEnabled && _promoImageUrl.isNotEmpty ? 1 : 0),
         itemBuilder: (_, i) {
-          final m = _matches[i],
+          if (_promoEnabled && _promoImageUrl.isNotEmpty && i == 0) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () async {
+                  final u = Uri.tryParse(_promoClickUrl);
+                  if (u != null && (u.scheme == 'https' || u.scheme == 'http')) {
+                    await launchUrl(u, mode: LaunchMode.externalApplication);
+                  }
+                },
+                child: Image.network(_promoImageUrl, height: 110, width: double.infinity, fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Padding(
+                    padding: EdgeInsets.all(16), child: Text('SK ESPORTS PROMO'),
+                  ),
+                ),
+              ),
+            );
+          }
+          final m = _matches[i - (_promoEnabled && _promoImageUrl.isNotEmpty ? 1 : 0)],
               joined = m['isJoined'] == true,
               isFull = _num(m['joined']) >= _num(m['slots']);
           return Card(
@@ -746,9 +856,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (joined || isAdmin) ...[
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text(
-                      'Room: ${m['rId']} | Pass: ${m['rPass']}',
-                      style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold),
+                    ElevatedButton(
+                      onPressed: () => _showRoomAfterAd(m),
+                      child: const Text('View Room ID / Pass'),
                     ),
                     if (isAdmin)
                       IconButton(
@@ -772,7 +882,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
                     ),
-                    onPressed: (joined || isFull) ? null : () => _join(m),
+                    onPressed: (joined || isFull) ? null : () => _startJoinAd(m),
                     child: Text(
                       joined ? 'JOINED ✓' : (isFull ? 'FULL' : 'Join ₹${m['fee']}'),
                       style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
@@ -879,6 +989,33 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.add, color: Colors.black),
             label: const Text('Create New Match', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             onPressed: _addMatch,
+          ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('ADSTERRA & PROMO SETTINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+                const SizedBox(height: 8),
+                TextField(controller: _joinAdUrlController, decoration: const InputDecoration(labelText: 'Join Ad Direct Link (10 sec)')),
+                const SizedBox(height: 8),
+                TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Room Ad Direct Link (5 sec)')),
+                const SizedBox(height: 8),
+                TextField(controller: _promoImageUrlController, decoration: const InputDecoration(labelText: 'Promo Image URL')),
+                const SizedBox(height: 8),
+                TextField(controller: _promoClickUrlController, decoration: const InputDecoration(labelText: 'Promo Click URL')),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Top Promo Banner ON / OFF'),
+                  value: _promoEnabled,
+                  onChanged: (v) => setState(() => _promoEnabled = v),
+                ),
+                ElevatedButton(
+                  onPressed: _saveAdAndPromoConfig,
+                  child: const Text('Save Ad & Promo Settings'),
+                ),
+                const Text('Dummy URL abhi example.com hai. Real Adsterra link baad mein yahin paste karein.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+              ]),
+            ),
           ),
           const SizedBox(height: 12),
                   Card(
