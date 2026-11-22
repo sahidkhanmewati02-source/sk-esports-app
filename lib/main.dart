@@ -224,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _superAdminUid = '';
   DateTime _clock = DateTime.now();
   Timer? _matchTicker;
-  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [];
+  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [];
   String _rulesText = 'BGMI Level 30+ ID required.\nRoom ID & Password match se 15 minute pehle milega.\nChat mein abuse, spam aur personal details share na karein.\nEntry fee aur withdrawal ke liye sahi UTR/UPI details dein.';
   final _chatC = TextEditingController(), _aboutLinksC = TextEditingController(), _rulesC = TextEditingController();
   final _upiC = TextEditingController(), _qrC = TextEditingController();
@@ -322,6 +322,31 @@ class _HomeScreenState extends State<HomeScreen> {
         _matches = [{'id': 'm1', ...def['m1']!, 'isJoined': false}];
       }
 
+      if (isSuperAdmin) {
+        final hRes = await http.get(Uri.parse('$kDbUrl/match_hisaab.json?auth=${widget.token}'));
+        final raw = hRes.statusCode == 200 && hRes.body != 'null' ? jsonDecode(hRes.body) as Map : <String, dynamic>{};
+        final accounts = <Map>[];
+        for (final match in _matches) {
+          final id = match['id'].toString();
+          final saved = raw[id] is Map ? Map<String, dynamic>.from(raw[id]) : <String, dynamic>{};
+          if (saved.isEmpty) {
+            final fresh = {'title': match['title'] ?? 'Match', 'collection': 0, 'prizeSent': 0, 'settled': false, 'status': 'OPEN', 'updatedAt': DateTime.now().millisecondsSinceEpoch};
+            await http.put(Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${widget.token}'), body: jsonEncode(fresh));
+            accounts.add({'id': id, ...fresh});
+          } else {
+            accounts.add({'id': id, ...saved, 'title': saved['title'] ?? match['title'] ?? 'Match'});
+          }
+        }
+        // Keep settled records visible even if a match is no longer in the active matches list.
+        raw.forEach((id, value) {
+          if (value is Map && !accounts.any((a) => a['id'].toString() == id.toString())) accounts.add({'id': id.toString(), ...value});
+        });
+        accounts.sort((a,b) => (a['settled'] == true ? 1 : 0).compareTo(b['settled'] == true ? 1 : 0));
+        _matchAccounts = accounts;
+      } else {
+        _matchAccounts = [];
+      }
+
       if (isAdmin) {
         final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
         final chats = <Map>[];
@@ -373,6 +398,96 @@ class _HomeScreenState extends State<HomeScreen> {
       _rulesC.text = _rulesText;
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<Map<String, dynamic>> _readMatchHisaab(String matchId, String title) async {
+    final uri = Uri.parse('$kDbUrl/match_hisaab/$matchId.json?auth=${widget.token}');
+    final res = await http.get(uri);
+    if (res.statusCode != 200) throw Exception('Match hisaab read nahi hua.');
+    if (res.body == 'null') {
+      final fresh = <String, dynamic>{'title': title, 'collection': 0, 'prizeSent': 0, 'settled': false, 'status': 'OPEN', 'updatedAt': DateTime.now().millisecondsSinceEpoch};
+      final put = await http.put(uri, body: jsonEncode(fresh));
+      if (put.statusCode < 200 || put.statusCode >= 300) throw Exception('Match hisaab create nahi hua.');
+      return fresh;
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+  }
+
+  Future<void> _addMatchCollection(String matchId, String title, int amount) async {
+    final data = await _readMatchHisaab(matchId, title);
+    if (data['settled'] == true) throw Exception('Yeh match already settled hai; collection accept nahi ho sakta.');
+    final total = _num(data['collection']) + amount;
+    final res = await http.patch(Uri.parse('$kDbUrl/match_hisaab/$matchId.json?auth=${widget.token}'), body: jsonEncode({'title': title, 'collection': total, 'prizeSent': _num(data['prizeSent']), 'updatedAt': DateTime.now().millisecondsSinceEpoch}));
+    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Match collection update nahi hua.');
+    if (mounted && isSuperAdmin) setState(() {
+      final i = _matchAccounts.indexWhere((x) => x['id'].toString() == matchId);
+      final row = {'id': matchId, ...data, 'title': title, 'collection': total};
+      if (i >= 0) _matchAccounts[i] = row; else _matchAccounts.insert(0, row);
+    });
+  }
+
+  Future<void> _addMatchPrize(String matchId, String title, int amount) async {
+    final data = await _readMatchHisaab(matchId, title);
+    if (data['settled'] == true) throw Exception('Match settled hai; prize entry lock hai.');
+    final total = _num(data['prizeSent']) + amount;
+    final res = await http.patch(Uri.parse('$kDbUrl/match_hisaab/$matchId.json?auth=${widget.token}'), body: jsonEncode({'title': title, 'collection': _num(data['collection']), 'prizeSent': total, 'updatedAt': DateTime.now().millisecondsSinceEpoch}));
+    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Prize hisaab update nahi hua.');
+    if (mounted && isSuperAdmin) setState(() {
+      final i = _matchAccounts.indexWhere((x) => x['id'].toString() == matchId);
+      final row = {'id': matchId, ...data, 'title': title, 'prizeSent': total};
+      if (i >= 0) _matchAccounts[i] = row; else _matchAccounts.insert(0, row);
+    });
+  }
+
+  Future<void> _transferMatchProfit(Map account) async {
+    if (!isSuperAdmin) return;
+    final id = account['id'].toString();
+    try {
+      final data = await _readMatchHisaab(id, account['title']?.toString() ?? 'Match');
+      if (data['settled'] == true || data['status'] == 'Settled ✅') return _msg('Yeh match pehle hi settled ho chuka hai.');
+      final profit = _num(data['collection']) - _num(data['prizeSent']);
+      if (profit <= 0) return _msg('Transfer ke liye Net Profit ₹0 se zyada hona chahiye.');
+      final walletRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
+      if (walletRes.statusCode != 200 || walletRes.body == 'null') throw Exception('Super Admin wallet read nahi hua.');
+      final userData = jsonDecode(walletRes.body) as Map;
+      final newBalance = _num(userData['wallet']) + profit;
+      final credit = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': newBalance}));
+      if (credit.statusCode < 200 || credit.statusCode >= 300) throw Exception('Main wallet credit fail hua.');
+      await _saveTxn(widget.uid, newBalance, 'Match Profit Transfer', '${data['title'] ?? account['title']}', profit, 'CREDITED');
+      final settle = await http.patch(Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${widget.token}'), body: jsonEncode({'settled': true, 'status': 'Settled ✅', 'settlementAmount': profit, 'settledAt': DateTime.now().millisecondsSinceEpoch}));
+      if (settle.statusCode < 200 || settle.statusCode >= 300) throw Exception('Profit wallet mein aa gaya, lekin settlement status save nahi hua. Dobara transfer na karein; Admin support check karein.');
+      _msg('₹$profit main wallet mein transfer ho gaya. Match Settled!');
+      await _sync();
+    } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
+  }
+
+  Widget _matchCollectionSection() {
+    final open = _matchAccounts.where((a) => a['settled'] != true && a['status'] != 'Settled ✅').toList();
+    final settled = _matchAccounts.where((a) => a['settled'] == true || a['status'] == 'Settled ✅').toList();
+    Widget tile(Map a) {
+      final collection = _num(a['collection']), prize = _num(a['prizeSent']), profit = collection - prize;
+      return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text((a['title'] ?? 'Match').toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 8),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total Collection'), Text('₹$collection', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))]),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Prize Sent'), Text('₹$prize', style: const TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold))]),
+        const Divider(),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Net Profit', style: TextStyle(fontWeight: FontWeight.bold)), Text('₹$profit', style: TextStyle(color: profit > 0 ? const Color(0xFF00E676) : Colors.white, fontWeight: FontWeight.bold, fontSize: 17))]),
+        if (a['settled'] == true || a['status'] == 'Settled ✅')
+          const Align(alignment: Alignment.centerRight, child: Text('Settled ✅', style: TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)))
+        else
+          SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: profit > 0 ? () => _transferMatchProfit(a) : null, icon: const Icon(Icons.account_balance_wallet), label: const Text('Transfer Profit to Main Wallet'))),
+      ])));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Padding(padding: EdgeInsets.fromLTRB(4, 8, 4, 4), child: Text('MATCH-WISE COLLECTION & PROFIT', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold, fontSize: 15))),
+      if (open.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Abhi koi active match hisaab nahi hai.'))),
+      ...open.map(tile),
+      if (settled.isNotEmpty) ...[
+        const Padding(padding: EdgeInsets.fromLTRB(4, 14, 4, 4), child: Text('SETTLED MATCH HISTORY', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
+        ...settled.map(tile),
+      ],
+    ]);
   }
 
   Future _saveTxn(String uid, int bal, String title, String sub, int amt, String status) async {
@@ -731,30 +846,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 setState(() => _tab = 1);
                 return _msg('Balance kam hai!');
               }
-              if (_superAdminUid.isEmpty) { Navigator.pop(ctx); return _msg('Super Admin wallet setup nahi hua. Admin ek baar app open karke refresh karein.'); }
               final j = _num(m['joined']) + 1;
               final oldBalance = _wallet;
               Navigator.pop(ctx);
               try {
-                final aRes = await http.get(Uri.parse('$kDbUrl/users/$_superAdminUid.json?auth=${widget.token}'));
-                if (aRes.statusCode != 200 || aRes.body == 'null') throw Exception('Super Admin wallet read nahi hua.');
-                final aData = jsonDecode(aRes.body) as Map;
-                final aBalance = _num(aData['wallet']);
                 final playerBalance = oldBalance - fee;
                 final pRes = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': playerBalance, 'ign': ignC.text.trim(), 'bgmiId': idC.text.trim()}));
                 if (pRes.statusCode < 200 || pRes.statusCode >= 300) throw Exception('Player wallet update fail hua.');
-                final cRes = await http.patch(Uri.parse('$kDbUrl/users/$_superAdminUid.json?auth=${widget.token}'), body: jsonEncode({'wallet': aBalance + fee}));
-                if (cRes.statusCode < 200 || cRes.statusCode >= 300) {
-                  await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': oldBalance}));
-                  throw Exception('Super Admin wallet credit fail hua; player fee refund kar di gayi.');
-                }
-                await _saveTxn(widget.uid, playerBalance, 'Joined: ${m['title']}', 'Entry fee paid to SK ESPORTS', fee, 'PAID');
-                await _saveTxn(_superAdminUid, aBalance + fee, 'Entry Fee Received', '${ignC.text.trim()} • ${m['title']}', fee, 'CREDITED');
+                await _saveTxn(widget.uid, playerBalance, 'Joined: ${m['title']}', 'Entry fee added to match collection', fee, 'PAID');
                 final mr = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'joined': j}));
                 final pr = await http.put(Uri.parse('$kDbUrl/matches/${m['id']}/players/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': ignC.text.trim(), 'bgmiId': idC.text.trim(), 'joinedAt': DateTime.now().millisecondsSinceEpoch, 'feePaid': fee}));
-                if (mr.statusCode < 200 || mr.statusCode >= 300 || pr.statusCode < 200 || pr.statusCode >= 300) throw Exception('Fee transfer ho gayi, par match registration save nahi hui. Dobara payment na karein; Admin se contact karein.');
+                if (mr.statusCode < 200 || mr.statusCode >= 300 || pr.statusCode < 200 || pr.statusCode >= 300) {
+                  await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': oldBalance}));
+                  throw Exception('Registration save nahi hui; player wallet refund kar diya.');
+                }
+                await _addMatchCollection(m['id'].toString(), m['title'].toString(), fee);
                 if (mounted) setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = playerBalance; m['joined'] = j; m['isJoined'] = true; });
-                _msg('Slot Confirmed! Entry fee Super Admin wallet mein credit ho gayi.');
+                _msg('Slot Confirmed! Entry fee match collection mein add ho gayi.');
               } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
             },
             child: Text('Pay ₹${m['fee']}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -967,7 +1075,7 @@ class _HomeScreenState extends State<HomeScreen> {
               final st = parseTime(startC.text), rm = parseTime(roomC.text);
               if (st == null || rm == null) return _msg('Calendar se match date/time aur room release select karein.');
               Navigator.pop(ctx);
-              await http.post(
+              final created = await http.post(
                 Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'),
                 body: jsonEncode({
                   'title': tC.text.trim(),
@@ -990,6 +1098,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 }),
               );
+              if (created.statusCode >= 200 && created.statusCode < 300) {
+                final key = (jsonDecode(created.body) as Map)['name']?.toString();
+                if (key != null) {
+                  final fresh = {'title': tC.text.trim(), 'collection': 0, 'prizeSent': 0, 'settled': false, 'status': 'OPEN', 'updatedAt': DateTime.now().millisecondsSinceEpoch};
+                  await http.put(Uri.parse('$kDbUrl/match_hisaab/$key.json?auth=${widget.token}'), body: jsonEncode(fresh));
+                }
+              }
               _msg('Match Live!');
               _sync();
             },
@@ -1000,13 +1115,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _sendPrize(Map u) {
+  void _sendPrize(Map u, {Map? match}) {
     final amtC = TextEditingController(), noteC = TextEditingController(text: 'Winning Prize');
+    final uid = u['uid'].toString();
+    final eligible = match != null ? [match] : _matches.where((m) => m['players'] is Map && (m['players'] as Map).containsKey(uid)).toList();
+    if (eligible.isEmpty) return _msg('Is player ka joined match nahi mila; match roster se prize bhejein.');
+    String selectedId = eligible.first['id'].toString();
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
         title: Text('Send Prize to ${u['ign']}', style: const TextStyle(fontSize: 15)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
+          DropdownButtonFormField<String>(
+            value: selectedId,
+            decoration: const InputDecoration(labelText: 'Select Match'),
+            items: eligible.map((m) => DropdownMenuItem<String>(value: m['id'].toString(), child: Text((m['title'] ?? 'Match').toString(), overflow: TextOverflow.ellipsis))).toList(),
+            onChanged: (v) { if (v != null) setDialogState(() => selectedId = v); },
+          ),
           TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
           TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Reason')),
         ]),
@@ -1016,16 +1141,21 @@ class _HomeScreenState extends State<HomeScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
             onPressed: () async {
               final add = _num(amtC.text);
-              if (add == 0) return;
+              if (add <= 0) return _msg('Valid prize amount dalein.');
+              final chosen = eligible.firstWhere((m) => m['id'].toString() == selectedId);
               Navigator.pop(ctx);
-              await _saveTxn('${u['uid']}', _num(u['wallet']) + add, noteC.text.trim(), 'SK ESPORTS Admin', add, 'CREDITED');
-              _msg('₹$add Sent!');
-              _sync();
+              try {
+                final bal = _num(u['wallet']) + add;
+                await _saveTxn(uid, bal, noteC.text.trim(), 'SK ESPORTS Admin • ${chosen['title']}', add, 'CREDITED');
+                await _addMatchPrize(selectedId, chosen['title'].toString(), add);
+                _msg('₹$add prize player wallet mein credit aur match hisaab mein add ho gaya.');
+                await _sync();
+              } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
             },
             child: const Text('Send', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
-      ),
+      )),
     );
   }
   void _showPlayers(Map m) {
@@ -1057,7 +1187,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 10)),
                         onPressed: () {
                           Navigator.pop(ctx);
-                          _sendPrize(u);
+                          _sendPrize(u, match: m);
                         },
                         child: const Text('Send Prize', style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
                       ),
@@ -1280,7 +1410,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           if (isSuperAdmin) ...[
-          Card(child: ListTile(leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E676)), title: const Text('Private Super Admin Wallet'), subtitle: const Text('Sirf Super Admin ko visible'), trailing: Text('₹$_wallet', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 18)))),
+          _matchCollectionSection(),
           _roleManagementCard(),
           Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('ABOUT LINKS & RULES EDITOR', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)), const SizedBox(height: 6), const Text('Har line: Button Name | https://link', style: TextStyle(fontSize: 11, color: Colors.grey)), TextField(controller: _aboutLinksC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Social / Support Links', border: OutlineInputBorder())), const SizedBox(height: 8), TextField(controller: _rulesC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Rules (BGMI Level 30+ etc.)', border: OutlineInputBorder())), ElevatedButton(onPressed: _saveAboutRules, child: const Text('Save About & Rules'))]))),
           ],
