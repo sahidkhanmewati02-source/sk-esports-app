@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 
 const String kApiKey = 'AIzaSyDdXPfU6_RkgFXyq58nUeEFIQI3JI_nVf0';
@@ -20,6 +21,76 @@ void main() => runApp(MaterialApp(
       ),
       home: const AuthScreen(),
     ));
+
+class AdViewerDialog extends StatefulWidget {
+  final String title, url;
+  final int seconds;
+  final VoidCallback onContinue;
+  const AdViewerDialog({super.key, required this.title, required this.url, required this.seconds, required this.onContinue});
+  @override
+  State<AdViewerDialog> createState() => _AdViewerDialogState();
+}
+
+class _AdViewerDialogState extends State<AdViewerDialog> {
+  late final WebViewController _controller;
+  Timer? _timer;
+  late int _remaining;
+
+  @override
+  void initState() {
+    super.initState();
+    _remaining = widget.seconds;
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..loadRequest(Uri.parse(widget.url));
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) { timer.cancel(); return; }
+      if (_remaining <= 1) {
+        timer.cancel();
+        setState(() => _remaining = 0);
+      } else {
+        setState(() => _remaining--);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: _remaining == 0,
+    child: Dialog(
+      insetPadding: EdgeInsets.zero,
+      backgroundColor: const Color(0xFF0D1117),
+      child: SizedBox.expand(
+        child: Column(children: [
+          Container(
+            color: const Color(0xFF161B22),
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+            child: SafeArea(
+              bottom: false,
+              child: Row(children: [
+                Expanded(child: Text(_remaining > 0 ? 'Ad: Please wait ${_remaining}s...' : 'Ad: Ready to continue', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                ElevatedButton(
+                  onPressed: _remaining == 0 ? () {
+                    Navigator.of(context).pop();
+                    widget.onContinue();
+                  } : null,
+                  child: const Text('Continue'),
+                ),
+              ]),
+            ),
+          ),
+          Expanded(child: WebViewWidget(controller: _controller)),
+        ]),
+      ),
+    ),
+  );
+}
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -467,13 +538,41 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
   }
 
+  Future<void> _confirmDeleteMatchAccount(Map account) async {
+    if (!isSuperAdmin) return;
+    final id = account['id']?.toString() ?? '';
+    if (id.isEmpty) return _msg('Match record ID nahi mila.');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Match Hisaab?'),
+        content: Text("${account['title'] ?? 'Match'} ka collection/profit record permanently delete ho jayega."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent), onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final res = await http.delete(Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${widget.token}'));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      if (mounted) setState(() => _matchAccounts.removeWhere((x) => x['id'].toString() == id));
+      _msg('Match hisaab record delete ho gaya.');
+    } else {
+      _msg('Record delete nahi hua. Firebase Rules check karein.');
+    }
+  }
+
   Widget _matchCollectionSection() {
     final open = _matchAccounts.where((a) => a['settled'] != true && a['status'] != 'Settled ✅').toList();
     final settled = _matchAccounts.where((a) => a['settled'] == true || a['status'] == 'Settled ✅').toList();
     Widget tile(Map a) {
       final collection = _num(a['collection']), prize = _num(a['prizeSent']), profit = collection - prize;
       return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text((a['title'] ?? 'Match').toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        Row(children: [
+          Expanded(child: Text((a['title'] ?? 'Match').toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+          IconButton(tooltip: 'Delete match hisaab', icon: const Icon(Icons.delete, color: Colors.redAccent), onPressed: () => _confirmDeleteMatchAccount(a)),
+        ]),
         const SizedBox(height: 8),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total Collection'), Text('₹$collection', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))]),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Prize Sent'), Text('₹$prize', style: const TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold))]),
@@ -733,41 +832,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
 
   Future<void> _showTimedAd({required String title, required String url, required int seconds, required VoidCallback onContinue}) async {
-    var remaining = seconds;
-    var finished = false;
-    await showDialog(
+    final trimmedUrl = url.trim();
+    final uri = Uri.tryParse(trimmedUrl);
+    if (trimmedUrl.isEmpty || uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
+      onContinue();
+      return;
+    }
+    await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) {
-          if (!finished && remaining == seconds) {
-            Future.doWhile(() async {
-              await Future.delayed(const Duration(seconds: 1));
-              if (!ctx.mounted || finished) return false;
-              setS(() => remaining--);
-              if (remaining <= 0) { finished = true; setS(() {}); return false; }
-              return true;
-            });
-          }
-          return AlertDialog(
-            title: Text(title),
-            content: Text(finished ? 'Continue karne ke liye button dabayein.' : 'Please wait $remaining seconds...'),
-            actions: [
-              ElevatedButton(
-                onPressed: finished ? () async {
-                  Navigator.pop(ctx);
-                  final uri = Uri.tryParse(url);
-                  if (uri != null && (uri.scheme == 'https' || uri.scheme == 'http')) {
-                    try { await launchUrl(uri, mode: LaunchMode.externalApplication); } catch (_) {}
-                  }
-                  onContinue();
-                } : null,
-                child: const Text('Continue'),
-              ),
-            ],
-          );
-        },
-      ),
+      builder: (_) => AdViewerDialog(title: title, url: trimmedUrl, seconds: seconds, onContinue: onContinue),
     );
   }
 
@@ -780,7 +854,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       showDialog(context: context, builder: (ctx) => AlertDialog(
         title: const Text('Match Room Details'),
-        content: SelectableText('Room ID: ${m['rId']}\\nPassword: ${m['rPass']}'),
+        content: SelectableText('Room ID: ${m['rId']}\nPassword: ${m['rPass']}'),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
       ));
     });
