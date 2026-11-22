@@ -605,16 +605,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _adminQuickActions() => Padding(padding: const EdgeInsets.only(bottom: 12), child: Row(children: [
     Expanded(child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
-    const SizedBox(width: 8),
+    const SizedBox(width: 6),
     Expanded(child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
-    const SizedBox(width: 8),
+    const SizedBox(width: 6),
     Expanded(child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
+    const SizedBox(width: 6),
+    Expanded(child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
   ]));
 
-  Widget _quickAction(IconData icon, String label, int count, VoidCallback onTap) => Card(margin: EdgeInsets.zero, child: InkWell(
-    onTap: onTap, borderRadius: BorderRadius.circular(12), child: Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4), child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, size: 19, color: const Color(0xFFFF9800)), const SizedBox(width: 5), Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFFF9800), borderRadius: BorderRadius.circular(10)), child: Text('$count', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)))]),
-      const SizedBox(height: 4), Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+  Widget _quickAction(IconData icon, String label, int? count, VoidCallback onTap) => Card(margin: EdgeInsets.zero, child: InkWell(
+    onTap: onTap, borderRadius: BorderRadius.circular(12), child: Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 3), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, size: 19, color: const Color(0xFFFF9800)), if (count != null) ...[const SizedBox(width: 5), Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFFF9800), borderRadius: BorderRadius.circular(10)), child: Text('$count', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)))] ]),
+      const SizedBox(height: 4), Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
     ])),
   ));
 
@@ -1496,6 +1498,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     ]),
 ]; 
+    final navPages = isAdmin
+        ? [pages[0], pages[1], pages[3], pages[4], pages[2]]
+        : [pages[0], pages[1], pages[3], pages[2]];
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
@@ -1513,7 +1518,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _loading ? const Center(child: CircularProgressIndicator()) : pages[_tab],
+      body: _loading ? const Center(child: CircularProgressIndicator()) : navPages[_tab],
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         currentIndex: _tab,
@@ -1522,9 +1527,9 @@ class _HomeScreenState extends State<HomeScreen> {
         items: [
           const BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
           const BottomNavigationBarItem(icon: Icon(Icons.wallet), label: 'Wallet'),
-          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
           const BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
           if (isAdmin) const BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
+          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
     );
