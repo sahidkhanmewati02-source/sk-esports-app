@@ -386,26 +386,53 @@ class _HomeScreenState extends State<HomeScreen> {
     if (txnRes.statusCode < 200 || txnRes.statusCode >= 300) throw Exception('Transaction history save nahi hui (${txnRes.statusCode}).');
   }
 
+
+  String _dateTimeInput(DateTime d) => '\${d.year.toString().padLeft(4, '0')}-\${d.month.toString().padLeft(2, '0')}-\${d.day.toString().padLeft(2, '0')} \${d.hour.toString().padLeft(2, '0')}:\${d.minute.toString().padLeft(2, '0')}';
+  Future<void> _pickDateTime(TextEditingController c) async {
+    final now = DateTime.now();
+    final seed = DateTime.tryParse(c.text.trim().replaceFirst(' ', 'T')) ?? now.add(const Duration(hours: 1));
+    final date = await showDatePicker(context: context, initialDate: seed, firstDate: DateTime(now.year, now.month, now.day), lastDate: DateTime(now.year + 5));
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(seed));
+    if (time == null || !mounted) return;
+    c.text = _dateTimeInput(DateTime(date.year, date.month, date.day, time.hour, time.minute));
+  }
+  String _smartMatchTime(Map m) {
+    final ms = _num(m['startAt']);
+    if (ms <= 0) return (m['time'] ?? 'Not set').toString();
+    final d = DateTime.fromMillisecondsSinceEpoch(ms), now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day), date = DateTime(d.year, d.month, d.day);
+    final diff = date.difference(today).inDays;
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const weekdays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    final day = diff == 0 ? 'Today' : (diff == 1 ? 'Tomorrow' : '\${weekdays[d.weekday - 1]}, \${d.day}');
+    final hour = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    return '\$day, \${d.day} \${months[d.month - 1]} • \${hour.toString().padLeft(2, '0')}:\${d.minute.toString().padLeft(2, '0')} \${d.hour >= 12 ? 'PM' : 'AM'}';
+  }
+
   bool _matchClosed(Map m) { final c = _num(m['closeAt']); return m['status'] == 'CLOSED' || (c > 0 && _clock.millisecondsSinceEpoch >= c); }
   bool _roomAvailable(Map m) { final r = _num(m['roomReleaseAt']); return m['hold'] != true && (r <= 0 || _clock.millisecondsSinceEpoch >= r); }
   String _timeLabel(dynamic raw) { final ms = _num(raw); if (ms <= 0) return 'Not set'; final d = DateTime.fromMillisecondsSinceEpoch(ms); return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}'; }
 
   void _editMatchTiming(Map m) {
-    String fmt(int ms) { final d = DateTime.fromMillisecondsSinceEpoch(ms); return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}'; }
     final now = DateTime.now();
-    final startC = TextEditingController(text: fmt(_num(m['startAt']) > 0 ? _num(m['startAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch));
-    final closeC = TextEditingController(text: fmt(_num(m['closeAt']) > 0 ? _num(m['closeAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch));
-    final roomC = TextEditingController(text: fmt(_num(m['roomReleaseAt']) > 0 ? _num(m['roomReleaseAt']) : now.add(const Duration(minutes: 45)).millisecondsSinceEpoch));
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Match Timer & Room Release'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [TextField(controller: startC, decoration: const InputDecoration(labelText: 'Match start (YYYY-MM-DD HH:MM)')), TextField(controller: closeC, decoration: const InputDecoration(labelText: 'Join auto-close (YYYY-MM-DD HH:MM)')), TextField(controller: roomC, decoration: const InputDecoration(labelText: 'Room ID release (YYYY-MM-DD HH:MM)')), const Text('24-hour local time format use karein.', style: TextStyle(fontSize: 11, color: Colors.grey))])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), ElevatedButton(onPressed: () async {
-      DateTime? parse(String v) => DateTime.tryParse(v.trim().replaceFirst(' ', 'T'));
-      final st = parse(startC.text), cl = parse(closeC.text), rm = parse(roomC.text);
-      if (st == null || cl == null || rm == null) return _msg('Date/time format sahi dalein.');
-      final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': cl.millisecondsSinceEpoch, 'roomReleaseAt': rm.millisecondsSinceEpoch, 'time': fmt(st.millisecondsSinceEpoch)};
-      final res = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode(data));
-      if (res.statusCode >= 200 && res.statusCode < 300) { m.addAll(data); if (mounted) setState(() {}); Navigator.pop(ctx); _msg('Match timer update ho gaya.'); } else { _msg('Timer save nahi hua. Firebase Rules check karein.'); }
+    final start = DateTime.fromMillisecondsSinceEpoch(_num(m['startAt']) > 0 ? _num(m['startAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch);
+    final room = DateTime.fromMillisecondsSinceEpoch(_num(m['roomReleaseAt']) > 0 ? _num(m['roomReleaseAt']) : now.add(const Duration(minutes: 45)).millisecondsSinceEpoch);
+    final startC = TextEditingController(text: _dateTimeInput(start));
+    final roomC = TextEditingController(text: _dateTimeInput(room));
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Edit Match Date & Time'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      TextField(controller: startC, readOnly: true, onTap: () => _pickDateTime(startC), decoration: const InputDecoration(labelText: 'Match Date & Time', suffixIcon: Icon(Icons.calendar_month))),
+      const SizedBox(height: 8),
+      const Text('Registration auto-close isi selected match date & time par hoga.', style: TextStyle(fontSize: 11, color: Colors.amber)),
+      TextField(controller: roomC, readOnly: true, onTap: () => _pickDateTime(roomC), decoration: const InputDecoration(labelText: 'Room ID Release Date & Time', suffixIcon: Icon(Icons.schedule))),
+    ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), ElevatedButton(onPressed: () async {
+      final st = DateTime.tryParse(startC.text.trim().replaceFirst(' ', 'T')), rm = DateTime.tryParse(roomC.text.trim().replaceFirst(' ', 'T'));
+      if (st == null || rm == null) return _msg('Date/time select karein.');
+      final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': st.millisecondsSinceEpoch, 'roomReleaseAt': rm.millisecondsSinceEpoch, 'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch})};
+      final res = await http.patch(Uri.parse('$kDbUrl/matches/' + m['id'].toString() + '.json?auth=' + widget.token), body: jsonEncode(data));
+      if (res.statusCode >= 200 && res.statusCode < 300) { m.addAll(data); if (mounted) setState(() {}); Navigator.pop(ctx); _msg('Match date/time aur auto-close update ho gaya.'); } else { _msg('Timer save nahi hua. Firebase Rules check karein.'); }
     }, child: const Text('Save Timer'))]));
   }
-
   Future<void> _toggleMatchHold(Map m) async {
     final hold = m['hold'] != true;
     final res = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'hold': hold}));
@@ -908,13 +935,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final tC = TextEditingController(),
         mapC = TextEditingController(text: 'Erangel'),
         modeC = TextEditingController(text: 'SOLO'),
-        timeC = TextEditingController(text: 'Today, 08:30 PM'),
         feeC = TextEditingController(text: '30'),
         killC = TextEditingController(text: '20'),
         winC = TextEditingController(text: '175'),
-        startC = TextEditingController(text: DateTime.now().add(const Duration(hours: 1)).toIso8601String().substring(0, 16).replaceFirst('T', ' ')),
-        closeC = TextEditingController(text: DateTime.now().add(const Duration(hours: 1)).toIso8601String().substring(0, 16).replaceFirst('T', ' ')),
-        roomC = TextEditingController(text: DateTime.now().add(const Duration(minutes: 45)).toIso8601String().substring(0, 16).replaceFirst('T', ' '));
+        startC = TextEditingController(text: _dateTimeInput(DateTime.now().add(const Duration(hours: 1)))),
+        roomC = TextEditingController(text: _dateTimeInput(DateTime.now().add(const Duration(minutes: 45))));
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -924,10 +949,9 @@ class _HomeScreenState extends State<HomeScreen> {
             TextField(controller: tC, decoration: const InputDecoration(labelText: 'Title')),
             TextField(controller: mapC, decoration: const InputDecoration(labelText: 'Map (Erangel/Miramar/Vikendi/Livik)')),
             TextField(controller: modeC, decoration: const InputDecoration(labelText: 'Mode (SOLO/SQUAD)')),
-            TextField(controller: timeC, decoration: const InputDecoration(labelText: 'Time / Display label')),
-            TextField(controller: startC, decoration: const InputDecoration(labelText: 'Start (YYYY-MM-DD HH:MM)')),
-            TextField(controller: closeC, decoration: const InputDecoration(labelText: 'Join auto-close (YYYY-MM-DD HH:MM)')),
-            TextField(controller: roomC, decoration: const InputDecoration(labelText: 'Room release (YYYY-MM-DD HH:MM)')),
+            TextField(controller: startC, readOnly: true, onTap: () => _pickDateTime(startC), decoration: const InputDecoration(labelText: 'Match Date & Time', suffixIcon: Icon(Icons.calendar_month))),
+            const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Registration auto-close selected match date & time par hoga.', style: TextStyle(fontSize: 11, color: Colors.amber))),
+            TextField(controller: roomC, readOnly: true, onTap: () => _pickDateTime(roomC), decoration: const InputDecoration(labelText: 'Room ID Release Date & Time', suffixIcon: Icon(Icons.schedule))),
             TextField(controller: feeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry Fee')),
             TextField(controller: killC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per Kill')),
             TextField(controller: winC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Chicken Dinner Prize')),
@@ -940,8 +964,8 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () async {
               if (tC.text.trim().isEmpty) return;
               DateTime? parseTime(String v) => DateTime.tryParse(v.trim().replaceFirst(' ', 'T'));
-              final st = parseTime(startC.text), cl = parseTime(closeC.text), rm = parseTime(roomC.text);
-              if (st == null || cl == null || rm == null) return _msg('Timer date/time format sahi dalein.');
+              final st = parseTime(startC.text), rm = parseTime(roomC.text);
+              if (st == null || rm == null) return _msg('Calendar se match date/time aur room release select karein.');
               Navigator.pop(ctx);
               await http.post(
                 Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'),
@@ -949,9 +973,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   'title': tC.text.trim(),
                   'map': mapC.text.trim(),
                   'mode': modeC.text.trim(),
-                  'time': timeC.text.trim().isEmpty ? startC.text.trim() : timeC.text.trim(),
+                  'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch}),
                   'startAt': st.millisecondsSinceEpoch,
-                  'closeAt': cl.millisecondsSinceEpoch,
+                  'closeAt': st.millisecondsSinceEpoch,
                   'roomReleaseAt': rm.millisecondsSinceEpoch,
                   'hold': false,
                   'status': 'OPEN',
@@ -1099,7 +1123,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                 ]),
                 Text(
-                  'Time: ${m['time']} | Entry: ₹${m['fee']} | Kill: ₹${m['kill']} | Win: ₹${m['win']}',
+                  'Time: ${_smartMatchTime(m)} | Entry: ₹${m['fee']} | Kill: ₹${m['kill']} | Win: ₹${m['win']}',
                   style: const TextStyle(color: Colors.grey, fontSize: 12),
                 ),
                 Text('Join: ${closed ? 'CLOSED' : 'OPEN'} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : 'WAITING UNTIL ${_timeLabel(m['roomReleaseAt'])}')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
