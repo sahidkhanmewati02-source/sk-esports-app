@@ -553,6 +553,65 @@ class _HomeScreenState extends State<HomeScreen> {
     final res = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'hold': hold}));
     if (res.statusCode >= 200 && res.statusCode < 300) { setState(() => m['hold'] = hold); _msg(hold ? 'Match HOLD par hai; room release ruk gaya.' : 'Match resume kar diya.'); } else { _msg('Hold status save nahi hua.'); }
   }
+  void _showPendingDepositsDialog() {
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontSize: 15)),
+      content: SizedBox(width: double.maxFinite, height: 350, child: _deps.isEmpty ? const Center(child: Text('Koi pending deposit nahi hai')) : ListView.builder(itemCount: _deps.length, itemBuilder: (_, i) {
+        final d = _deps[i];
+        return Card(child: ListTile(title: Text('${d['ign']} • ₹${d['amt']}'), subtitle: Text('UTR: ${d['utr']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
+            Navigator.pop(ctx); final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => {});
+            if (u.isNotEmpty) await _saveTxn('${d['uid']}', _num(u['wallet']) + _num(d['amt']), 'Wallet Deposit', 'UTR: ${d['utr']}', _num(d['amt']), 'APPROVED');
+            await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'APPROVED'})); _msg('Approved!'); _sync();
+          }),
+          IconButton(icon: const Icon(Icons.cancel, color: Colors.redAccent), onPressed: () async { Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'})); _sync(); }),
+        ])));
+      })),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
+  }
+
+  void _showPendingWithdrawalsDialog() {
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontSize: 15)),
+      content: SizedBox(width: double.maxFinite, height: 350, child: _withs.isEmpty ? const Center(child: Text('Koi pending withdrawal nahi hai')) : ListView.builder(itemCount: _withs.length, itemBuilder: (_, i) {
+        final wd = _withs[i];
+        return Card(child: ListTile(title: Text('${wd['ign']} • ₹${wd['amt']}'), subtitle: Text('UPI: ${wd['upi']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(icon: const Icon(Icons.copy, color: Colors.lightBlueAccent), onPressed: () { Clipboard.setData(ClipboardData(text: '${wd['upi']}')); _msg('Player UPI Copied!'); }),
+          IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
+            Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/withdrawals/${wd['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'PAID'}));
+            final tRes = await http.get(Uri.parse('$kDbUrl/users/${wd['uid']}/txns.json?auth=${widget.token}'));
+            if (tRes.statusCode == 200 && tRes.body != 'null') {
+              final tMap = jsonDecode(tRes.body) as Map<String, dynamic>;
+              for (final e in tMap.entries.toList().reversed) {
+                if (e.value is Map && e.value['title'] == 'UPI Withdrawal' && e.value['status'] == 'PENDING' && _num(e.value['amt']) == _num(wd['amt'])) {
+                  await http.patch(Uri.parse('$kDbUrl/users/${wd['uid']}/txns/${e.key}.json?auth=${widget.token}'), body: jsonEncode({'status': 'SUCCESS'})); break;
+                }
+              }
+            }
+            _msg('Marked as Paid!'); _sync();
+          }),
+        ])));
+      })),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
+  }
+
+  Widget _adminQuickActions() => Padding(padding: const EdgeInsets.only(bottom: 12), child: Row(children: [
+    Expanded(child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
+    const SizedBox(width: 8),
+    Expanded(child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
+    const SizedBox(width: 8),
+    Expanded(child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
+  ]));
+
+  Widget _quickAction(IconData icon, String label, int count, VoidCallback onTap) => Card(margin: EdgeInsets.zero, child: InkWell(
+    onTap: onTap, borderRadius: BorderRadius.circular(12), child: Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, size: 19, color: const Color(0xFFFF9800)), const SizedBox(width: 5), Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFFF9800), borderRadius: BorderRadius.circular(10)), child: Text('$count', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)))]),
+      const SizedBox(height: 4), Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+    ])),
+  ));
+
   void _showAllPlayersDialog() {
     final searchC = TextEditingController();
     showDialog(
@@ -1202,12 +1261,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
+    final showQuickActions = isAdmin;
+    final leadingItems = (showPromo ? 1 : 0) + (showQuickActions ? 1 : 0);
     final pages = [
       ListView.builder(
         padding: const EdgeInsets.all(12),
-        itemCount: _matches.length + (_promoEnabled && _promoImageUrl.isNotEmpty ? 1 : 0),
+        itemCount: _matches.length + leadingItems,
         itemBuilder: (_, i) {
-          if (_promoEnabled && _promoImageUrl.isNotEmpty && i == 0) {
+          if (showPromo && i == 0) {
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               clipBehavior: Clip.antiAlias,
@@ -1226,7 +1288,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             );
           }
-          final m = _matches[i - (_promoEnabled && _promoImageUrl.isNotEmpty ? 1 : 0)],
+          final quickIndex = showPromo ? 1 : 0;
+          if (showQuickActions && i == quickIndex) return _adminQuickActions();
+          final m = _matches[i - leadingItems],
               joined = m['isJoined'] == true,
               isFull = _num(m['joined']) >= _num(m['slots']),
               closed = _matchClosed(m),
