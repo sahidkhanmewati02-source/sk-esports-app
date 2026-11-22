@@ -212,7 +212,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool get isAdmin => widget.email.toLowerCase() == kAdmin.toLowerCase();
+  bool get isSuperAdmin => widget.email.toLowerCase() == kAdmin.toLowerCase();
+  bool _isCoAdmin = false;
+  bool get isAdmin => isSuperAdmin || _isCoAdmin;
   int _tab = 0, _wallet = 0;
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
@@ -222,7 +224,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _superAdminUid = '';
   DateTime _clock = DateTime.now();
   Timer? _matchTicker;
-  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [];
+  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [];
+  String _rulesText = 'BGMI Level 30+ ID required.\nRoom ID & Password match se 15 minute pehle milega.\nChat mein abuse, spam aur personal details share na karein.\nEntry fee aur withdrawal ke liye sahi UTR/UPI details dein.';
+  final _chatC = TextEditingController(), _aboutLinksC = TextEditingController(), _rulesC = TextEditingController();
   final _upiC = TextEditingController(), _qrC = TextEditingController();
   final _joinAdUrlController = TextEditingController(text: 'https://example.com');
   final _roomAdUrlController = TextEditingController(text: 'https://example.com');
@@ -240,6 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _matchTicker?.cancel();
     _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose();
+    _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose();
     super.dispose();
   }
 
@@ -266,7 +271,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _promoImageUrlController.text = _promoImageUrl;
         _promoClickUrlController.text = _promoClickUrl;
       }
-      if (isAdmin) {
+      if (isSuperAdmin) {
         _superAdminUid = widget.uid;
         await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'superAdminUid': widget.uid}));
       }
@@ -279,6 +284,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _ign = d['ign'] ?? 'SK_Player';
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
+        _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
           _txns = (d['txns'] as Map).values.toList().reversed.toList();
         }
@@ -317,6 +323,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       if (isAdmin) {
+        final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
+        final chats = <Map>[];
+        if (chatRes.statusCode == 200 && chatRes.body != 'null') (jsonDecode(chatRes.body) as Map).forEach((k, v) { if (v is Map) chats.add({...v, 'id': k}); });
+        _chatMessages = chats;
         final dRes = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
         final deps = [];
         if (dRes.statusCode == 200 && dRes.body != 'null') {
@@ -345,7 +355,22 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
         _users = usrs;
+      } else {
+        final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
+        final chats = <Map>[];
+        if (chatRes.statusCode == 200 && chatRes.body != 'null') (jsonDecode(chatRes.body) as Map).forEach((k, v) { if (v is Map) chats.add({...v, 'id': k}); });
+        _chatMessages = chats;
       }
+      final cfgRes = await http.get(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'));
+      if (cfgRes.statusCode == 200 && cfgRes.body != 'null') {
+        final cfg = jsonDecode(cfgRes.body);
+        _aboutLinks = cfg['aboutLinks'] is List ? List.from(cfg['aboutLinks']) : [{'label':'Support DM','url':'https://t.me/SK_EsportsSupport'},{'label':'Official Telegram','url':'https://t.me/SK_ESPORTSOFFICIAL'},{'label':'YouTube - SK Sahid YT','url':'https://youtube.com/@sk_sahidyt'},{'label':'Instagram','url':'https://www.instagram.com/'}];
+        _rulesText = cfg['rulesText']?.toString() ?? _rulesText;
+      } else if (_aboutLinks.isEmpty) {
+        _aboutLinks = [{'label':'Support DM','url':'https://t.me/SK_EsportsSupport'},{'label':'Official Telegram','url':'https://t.me/SK_ESPORTSOFFICIAL'},{'label':'YouTube - SK Sahid YT','url':'https://youtube.com/@sk_sahidyt'},{'label':'Instagram','url':'https://www.instagram.com/'}];
+      }
+      _aboutLinksC.text = _aboutLinks.map((e) => e['label'].toString() + ' | ' + e['url'].toString()).join('\n');
+      _rulesC.text = _rulesText;
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }
@@ -573,6 +598,83 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _loadChat() async {
+    final res = await http.get(Uri.parse('$kDbUrl/chat.json?auth=' + widget.token));
+    if (res.statusCode == 200) {
+      final list = <Map>[];
+      if (res.body != 'null') (jsonDecode(res.body) as Map).forEach((k, v) { if (v is Map) list.add({...v, 'id': k}); });
+      list.sort((a,b) { final p = (b['pinned'] == true ? 1 : 0).compareTo(a['pinned'] == true ? 1 : 0); return p != 0 ? p : _num(a['createdAt']).compareTo(_num(b['createdAt'])); });
+      if (mounted) setState(() => _chatMessages = list);
+    }
+  }
+  Future<void> _sendChat() async {
+    final msg = _chatC.text.trim();
+    if (msg.isEmpty) return;
+    final modRes = await http.get(Uri.parse('$kDbUrl/chatModeration/' + widget.uid + '.json?auth=' + widget.token));
+    final mod = modRes.statusCode == 200 && modRes.body != 'null' ? jsonDecode(modRes.body) as Map : <String,dynamic>{};
+    final until = _num(mod['muteUntil']);
+    if (until > DateTime.now().millisecondsSinceEpoch) return _msg('Aap muted hain. ' + (((until - DateTime.now().millisecondsSinceEpoch) / 60000).ceil()).toString() + ' minute baad try karein.');
+    final privileged = isAdmin;
+    final hasLink = RegExp(r'(https?://|www\.|t\.me/|discord\.gg/|chat\.whatsapp\.com/)', caseSensitive: false).hasMatch(msg);
+    if (!privileged && hasLink) return _msg('Players chat mein links/invites allowed nahi hain.');
+    final badWords = ['fuck','shit','bitch','asshole','madarchod','bhenchod','behenchod','chutiya','gandu','harami','randi','mc','bc'];
+    final found = !privileged && badWords.any((w) => RegExp('(^|[^a-z])' + RegExp.escape(w) + '([^a-z]|$)', caseSensitive:false).hasMatch(msg));
+    if (found) {
+      final strikes = _num(mod['strikes']) + 1;
+      final muteMs = strikes == 2 ? 15 * 60 * 1000 : (strikes >= 3 ? 2 * 60 * 60 * 1000 : 0);
+      await http.patch(Uri.parse('$kDbUrl/chatModeration/' + widget.uid + '.json?auth=' + widget.token), body: jsonEncode({'strikes': strikes, 'muteUntil': muteMs == 0 ? 0 : DateTime.now().millisecondsSinceEpoch + muteMs}));
+      if (strikes == 1) return _msg('Warning 1/3: abusive language allowed nahi hai.');
+      if (strikes == 2) return _msg('2nd violation: 15 minute mute laga diya gaya.');
+      return _msg('3rd violation: 2 ghante ka mute laga diya gaya.');
+    }
+    final data = {'uid': widget.uid, 'ign': _ign, 'email': widget.email, 'message': msg, 'createdAt': DateTime.now().millisecondsSinceEpoch, 'pinned': false, 'role': isSuperAdmin ? 'superadmin' : (_isCoAdmin ? 'coadmin' : 'player')};
+    final res = await http.post(Uri.parse('$kDbUrl/chat.json?auth=' + widget.token), body: jsonEncode(data));
+    if (res.statusCode >= 200 && res.statusCode < 300) { _chatC.clear(); await _loadChat(); } else { _msg('Message send nahi hua. Firebase Rules check karein.'); }
+  }
+  Future<void> _chatAction(Map m, String action) async {
+    final path = '$kDbUrl/chat/' + m['id'].toString() + '.json?auth=' + widget.token;
+    final res = action == 'delete' ? await http.delete(Uri.parse(path)) : await http.patch(Uri.parse(path), body: jsonEncode({'pinned': m['pinned'] != true}));
+    if (res.statusCode >= 200 && res.statusCode < 300) await _loadChat(); else _msg('Chat action failed. Firebase Rules check karein.');
+  }
+  Widget _chatPage() {
+    final sorted = [..._chatMessages]..sort((a,b) { final p = (b['pinned'] == true ? 1 : 0).compareTo(a['pinned'] == true ? 1 : 0); return p != 0 ? p : _num(a['createdAt']).compareTo(_num(b['createdAt'])); });
+    return Column(children: [
+      Padding(padding: const EdgeInsets.all(10), child: Row(children: [const Expanded(child: Text('SK ESPORTS Community Chat', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))), IconButton(onPressed: _loadChat, icon: const Icon(Icons.refresh))])),
+      Expanded(child: sorted.isEmpty ? const Center(child: Text('Abhi chat khaali hai. Pehla message bhejein!')) : ListView.builder(itemCount: sorted.length, itemBuilder: (_, i) {
+        final m = sorted[i];
+        final ign = m['ign']?.toString() ?? 'Player';
+        return Card(child: ListTile(
+          leading: CircleAvatar(child: Text(ign.isNotEmpty ? ign[0].toUpperCase() : 'P')),
+          title: Row(children: [Expanded(child: Text(ign, style: const TextStyle(fontWeight: FontWeight.bold))), if (m['pinned'] == true) const Icon(Icons.push_pin, color: Colors.amber, size: 16)]),
+          subtitle: Text(m['message']?.toString() ?? ''),
+          trailing: isAdmin ? PopupMenuButton<String>(onSelected: (v) => _chatAction(m, v), itemBuilder: (_) => [PopupMenuItem(value: 'pin', child: Text(m['pinned'] == true ? 'Unpin' : 'Pin')), const PopupMenuItem(value: 'delete', child: Text('Delete'))]) : null,
+        ));
+      })),
+      SafeArea(child: Padding(padding: const EdgeInsets.all(10), child: Row(children: [Expanded(child: TextField(controller: _chatC, minLines: 1, maxLines: 4, decoration: const InputDecoration(hintText: 'Message as BGMI IGN', border: OutlineInputBorder()))), const SizedBox(width: 8), IconButton(onPressed: _sendChat, icon: const Icon(Icons.send, color: Color(0xFFFF9800)))]))),
+    ]);
+  }
+  Future<void> _saveAboutRules() async {
+    final links = <Map<String,String>>[];
+    for (final line in _aboutLinksC.text.split('\n')) {
+      final parts = line.split('|');
+      if (parts.length < 2) continue;
+      final label = parts.first.trim(), url = parts.sublist(1).join('|').trim();
+      if (label.isNotEmpty && (url.startsWith('https://') || url.startsWith('http://')) && Uri.tryParse(url) != null) links.add({'label': label, 'url': url});
+    }
+    final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=' + widget.token), body: jsonEncode({'aboutLinks': links, 'rulesText': _rulesC.text.trim()}));
+    if (res.statusCode >= 200 && res.statusCode < 300) { setState(() { _aboutLinks = links; _rulesText = _rulesC.text.trim(); }); _msg('About & Rules save ho gaye.'); } else _msg('About & Rules save nahi hue. Firebase Rules check karein.');
+  }
+  Future<void> _toggleCoAdmin(Map user) async {
+    if (!isSuperAdmin || user['email']?.toString().toLowerCase() == kAdmin.toLowerCase()) return;
+    final make = user['role'] != 'coadmin';
+    final res = await http.patch(Uri.parse('$kDbUrl/users/' + user['uid'].toString() + '.json?auth=' + widget.token), body: jsonEncode({'role': make ? 'coadmin' : 'player'}));
+    if (res.statusCode >= 200 && res.statusCode < 300) { _msg(make ? 'Co-Admin bana diya.' : 'Co-Admin role hata diya.'); _sync(); } else _msg('Role update nahi hua. Firebase Rules check karein.');
+  }
+  Widget _roleManagementCard() => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    const Text('CO-ADMIN MANAGEMENT', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+    const SizedBox(height: 6),
+    ..._users.where((u) => u['email']?.toString().toLowerCase() != kAdmin.toLowerCase()).map((u) => ListTile(dense: true, title: Text(u['ign']?.toString() ?? 'Player'), subtitle: Text(u['email']?.toString() ?? ''), trailing: TextButton(onPressed: () => _toggleCoAdmin(u), child: Text(u['role'] == 'coadmin' ? 'Remove' : 'Make Co-Admin')))),
+  ])));
   void _join(Map m) {
     final ignC = TextEditingController(text: _ign),
         idC = TextEditingController(text: _bgmiId == 'Not Set' ? '' : _bgmiId);
@@ -1080,23 +1182,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       ListView(padding: const EdgeInsets.all(16), children: [
         Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
-        const Card(
-          child: Padding(
-            padding: EdgeInsets.all(14),
-            child: Text('RULES:\n• BGMI Level 30+ ID required.\n• Room ID & Pass 15 min pehle milega.'),
-          ),
-        ),
-        ElevatedButton(
-                                onPressed: () async {
-                        final url = Uri.parse('https://t.me/SK_ESPORTSOFFICIAL');
-                        if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-                          Clipboard.setData(const ClipboardData(text: 'https://t.me/SK_ESPORTSOFFICIAL'));
-                          _msg('Telegram Copied!');
-                        }
-                      },
-
-          child: const Text('Join Telegram (@SK_ESPORTSOFFICIAL)'),
-        ),
+        Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('RULES:\n$_rulesText'))),
+        ..._aboutLinks.map((link) => Padding(padding: const EdgeInsets.only(bottom: 7), child: OutlinedButton.icon(onPressed: () async { final uri = Uri.tryParse(link['url'].toString()); if (uri != null && !await launchUrl(uri, mode: LaunchMode.externalApplication)) { await Clipboard.setData(ClipboardData(text: link['url'].toString())); _msg('Link copied!'); } }, icon: const Icon(Icons.open_in_new), label: Text(link['label'].toString())))),
                 OutlinedButton(
           onPressed: () async {
             await (await SharedPreferences.getInstance()).clear();
@@ -1107,8 +1194,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
 
       ]),
+      _chatPage(),
       if (isAdmin)
         ListView(padding: const EdgeInsets.all(14), children: [
+          if (isSuperAdmin) ...[
           Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -1132,13 +1221,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ),
           ),
+          ],
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
             icon: const Icon(Icons.add, color: Colors.black),
             label: const Text('Create New Match', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             onPressed: _addMatch,
           ),
-          Card(
+          if (isSuperAdmin) Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1165,8 +1255,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ),
           ),
+          if (isSuperAdmin) ...[
+          Card(child: ListTile(leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E676)), title: const Text('Private Super Admin Wallet'), subtitle: const Text('Sirf Super Admin ko visible'), trailing: Text('₹$_wallet', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 18)))),
+          _roleManagementCard(),
+          Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('ABOUT LINKS & RULES EDITOR', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)), const SizedBox(height: 6), const Text('Har line: Button Name | https://link', style: TextStyle(fontSize: 11, color: Colors.grey)), TextField(controller: _aboutLinksC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Social / Support Links', border: OutlineInputBorder())), const SizedBox(height: 8), TextField(controller: _rulesC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Rules (BGMI Level 30+ etc.)', border: OutlineInputBorder())), ElevatedButton(onPressed: _saveAboutRules, child: const Text('Save About & Rules'))]))),
           const SizedBox(height: 12),
-                  Card(
+          Card(
           child: ListTile(
             leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E676)),
             title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -1310,6 +1404,7 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
             label: const Text('All Players History', style: TextStyle(color: Color(0xFFFF9800))),
           ),
+          ],
 
     ]),
 ]; 
@@ -1340,6 +1435,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
           const BottomNavigationBarItem(icon: Icon(Icons.wallet), label: 'Wallet'),
           const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          const BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
           if (isAdmin) const BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
         ],
       ),
