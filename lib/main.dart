@@ -645,7 +645,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final hasLink = RegExp(r'(https?://|www\.|t\.me/|discord\.gg/|chat\.whatsapp\.com/)', caseSensitive: false).hasMatch(msg);
     if (!privileged && hasLink) return _msg('Players chat mein links/invites allowed nahi hain.');
     final badWords = ['fuck','shit','bitch','asshole','madarchod','bhenchod','behenchod','chutiya','gandu','harami','randi','mc','bc'];
-    final found = !privileged && badWords.any((w) => RegExp('(^|[^a-z])' + RegExp.escape(w) + '([^a-z]|$)', caseSensitive:false).hasMatch(msg));
+    final found = !privileged && badWords.any((w) => RegExp(r'(^|[^a-z])' + RegExp.escape(w) + r'([^a-z]|$)', caseSensitive:false).hasMatch(msg));
     if (found) {
       final strikes = _num(mod['strikes']) + 1;
       final muteMs = strikes == 2 ? 15 * 60 * 1000 : (strikes >= 3 ? 2 * 60 * 60 * 1000 : 0);
