@@ -765,12 +765,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                     spacing: 0,
                                     children: [
                                       IconButton(
+                                        tooltip: 'Add Wallet Balance',
+                                        icon: const Icon(Icons.add_circle, color: Color(0xFF00E676), size: 22),
+                                        onPressed: () => _addManualBalance(u),
+                                      ),
+                                      IconButton(
                                         tooltip: 'History',
                                         icon: const Icon(Icons.history, color: Colors.lightBlueAccent),
                                         onPressed: () => _showHistory(u),
                                       ),
                                       IconButton(
-                                        tooltip: 'Send Prize',
+                                        tooltip: 'Send Prize (joined match)',
                                         icon: const Icon(Icons.emoji_events, color: Color(0xFFFF9800)),
                                         onPressed: () => _sendPrize(u),
                                       ),
@@ -1256,6 +1261,49 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _addManualBalance(Map u) {
+    if (!isAdmin) return _msg('Sirf Super Admin / Co-Admin balance add kar sakte hain.');
+    final amountC = TextEditingController();
+    final reasonC = TextEditingController(text: 'Manual Bonus / Refund');
+    final uid = (u['uid'] ?? '').toString();
+    if (uid.isEmpty) return _msg('Player UID nahi mila.');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Add Balance • ${u['ign'] ?? 'Player'}', style: const TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Current balance: ₹${_num(u['wallet'])}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+          TextField(controller: amountC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Add Amount (₹)')),
+          TextField(controller: reasonC, decoration: const InputDecoration(labelText: 'Reason (Bonus / Refund / Test)')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+            onPressed: () async {
+              final amount = _num(amountC.text.trim());
+              final reason = reasonC.text.trim();
+              if (amount <= 0 || reason.isEmpty) return _msg('Valid amount aur reason dalein.');
+              Navigator.pop(ctx);
+              try {
+                final latest = await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'));
+                if (latest.statusCode != 200 || latest.body == 'null') throw Exception('Player account nahi mila.');
+                final player = jsonDecode(latest.body) as Map;
+                final oldBalance = _num(player['wallet']);
+                final newBalance = oldBalance + amount;
+                await _saveTxn(uid, newBalance, reason, 'Manual credit by SK ESPORTS Admin', amount, 'CREDITED');
+                _msg('₹$amount ${u['ign'] ?? 'Player'} ke wallet mein add ho gaye.');
+                await _sync();
+              } catch (e) {
+                _msg(e.toString().replaceAll('Exception: ', ''));
+              }
+            },
+            child: const Text('Add Balance', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
   void _sendPrize(Map u, {Map? match}) {
     final amtC = TextEditingController(), noteC = TextEditingController(text: 'Winning Prize');
     final uid = u['uid'].toString();
