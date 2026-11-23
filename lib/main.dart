@@ -205,6 +205,34 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   @override
+  Widget _paymentSettingsCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('PAYMENT METHOD / UPI DETAILS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+          const SizedBox(height: 8),
+          TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
+            onPressed: () async {
+              _upiId = _upiC.text.trim();
+              _qrUrl = _qrC.text.trim();
+              final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
+              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Payment details save nahi hue.');
+              _msg('New Payment QR Live!');
+              if (mounted) setState(() {});
+            },
+            child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ]),
+      ),
+    );
+  }
+
   Widget build(BuildContext context) {
     if (_checking) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFFFF9800))));
@@ -327,6 +355,54 @@ class _HomeScreenState extends State<HomeScreen> {
     if (players is Map) return players.length;
     if (players is List) return players.length;
     return 0;
+  }  int _matchPlayerCount(Map m) {
+    final players = m['players'];
+    if (players is Map) return players.length;
+    if (players is List) return players.length;
+    return 0;
+  }
+
+  int _rosterCollection(Map match, Map hisaab) {
+    final fee = _num(match['fee']);
+    final players = match['players'];
+    var rosterTotal = 0;
+    var rosterCount = 0;
+    if (players is Map) {
+      for (final p in players.values) {
+        if (p is Map) {
+          rosterCount++;
+          rosterTotal += p['feePaid'] == null ? fee : _num(p['feePaid']);
+        }
+      }
+    } else if (players is List) {
+      for (final p in players) {
+        if (p is Map) {
+          rosterCount++;
+          rosterTotal += p['feePaid'] == null ? fee : _num(p['feePaid']);
+        }
+      }
+    }
+    final joinedCount = _num(match['joined']);
+    final joinedFallback = (joinedCount > rosterCount ? joinedCount : rosterCount) * fee;
+    final calculated = rosterTotal > joinedFallback ? rosterTotal : joinedFallback;
+    final saved = _num(hisaab['collection']);
+    return calculated > saved ? calculated : saved;
+  }
+
+  Future<Map<String, dynamic>> _refreshMatchHisaabFromRoster(Map match) async {
+    final id = match['id'].toString();
+    final title = match['title']?.toString() ?? 'Match';
+    final data = await _readMatchHisaab(id, title);
+    final collection = _rosterCollection(match, data);
+    if (collection != _num(data['collection'])) {
+      final res = await http.patch(
+        Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${widget.token}'),
+        body: jsonEncode({'title': title, 'collection': collection, 'updatedAt': DateTime.now().millisecondsSinceEpoch}),
+      );
+      if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Roster se match collection update nahi hua.');
+      data['collection'] = collection;
+    }
+    return data;
   }
 
   Future _sync() async {
@@ -520,7 +596,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!isSuperAdmin) return;
     final id = account['id'].toString();
     try {
-      final data = await _readMatchHisaab(id, account['title']?.toString() ?? 'Match');
+      final match = _matches.firstWhere((m) => m['id'].toString() == id, orElse: () => account['match'] is Map ? Map.from(account['match']) : <String, dynamic>{'id': id, 'title': account['title'], 'fee': 0, 'joined': 0, 'players': {}});
+      final data = await _refreshMatchHisaabFromRoster(match);
       final netProfit = _num(data['collection']) - _num(data['prizeSent']);
       final alreadyTransferred = _num(data['transferredAmount']);
       final availableProfit = netProfit - alreadyTransferred;
@@ -579,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final title = match['title']?.toString() ?? 'Match';
     Map<String, dynamic> data;
     try {
-      data = await _readMatchHisaab(id, title);
+      data = await _refreshMatchHisaabFromRoster(match);
     } catch (e) {
       _msg(e.toString().replaceAll('Exception: ', ''));
       return;
@@ -615,7 +692,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: ElevatedButton.icon(
                       onPressed: available > 0 && !transferring ? () async {
                         setDialogState(() => transferring = true);
-                        await _transferMatchProfit({'id': id, 'title': title});
+                        await _transferMatchProfit({'id': id, 'title': title, 'match': match});
                         try {
                           final latest = await _readMatchHisaab(id, title);
                           if (ctx.mounted) setDialogState(() { data = latest; transferring = false; });
@@ -1646,6 +1723,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(width: 10),
             Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
           ]),
+          if (isSuperAdmin) ...[
+            const SizedBox(height: 10),
+            _paymentSettingsCard(),
+          ],
           const SizedBox(height: 10),
           Expanded(
             child: ListView.builder(
@@ -1677,36 +1758,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (isAdmin)
         ListView(padding: const EdgeInsets.all(14), children: [
           if (isSuperAdmin) ...[
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('CHANGE PAYMENT QR & UPI', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-                const SizedBox(height: 8),
-                TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
-                const SizedBox(height: 8),
-                TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
-                  onPressed: () async {
-                    _upiId = _upiC.text.trim();
-                    _qrUrl = _qrC.text.trim();
-                    await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
-                    _msg('New Payment QR Live!');
-                  },
-                  child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                ),
-              ]),
-            ),
-          ),
+
           ],
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
-            icon: const Icon(Icons.add, color: Colors.black),
-            label: const Text('Create New Match', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-            onPressed: _addMatch,
-          ),
           if (isSuperAdmin) Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
