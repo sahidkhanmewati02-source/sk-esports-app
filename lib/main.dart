@@ -1554,7 +1554,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  @override
   Widget _paymentSettingsCard() {
     return Card(
       child: Padding(
