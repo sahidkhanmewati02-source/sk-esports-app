@@ -274,6 +274,61 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 }
 
+class AdsterraBanner extends StatefulWidget {
+  final String code;
+  const AdsterraBanner({super.key, required this.code});
+  @override
+  State<AdsterraBanner> createState() => _AdsterraBannerState();
+}
+class _AdsterraBannerState extends State<AdsterraBanner> {
+  late final WebViewController _controller;
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel('ExternalLink', onMessageReceived: (message) async {
+        final uri = Uri.tryParse(message.message);
+        if (uri != null && (uri.scheme == 'https' || uri.scheme == 'http')) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      })
+      ..setNavigationDelegate(NavigationDelegate(
+        onNavigationRequest: (request) async {
+          final uri = Uri.tryParse(request.url);
+          if (request.isMainFrame && uri != null &&
+              (uri.scheme == 'https' || uri.scheme == 'http')) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+            return NavigationDecision.prevent;
+          }
+          return NavigationDecision.navigate;
+        },
+      ))
+      ..loadHtmlString(_buildAdHtml(widget.code));
+  }
+  String _buildAdHtml(String code) => '''
+<!doctype html><html><head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<style>
+html,body{margin:0;padding:0;width:320px;height:50px;overflow:hidden;background:transparent}
+#ad-slot{width:320px;height:50px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+</style></head><body>
+<div id="ad-slot">$code</div>
+<script>
+(function(){
+  window.open=function(url){if(url)ExternalLink.postMessage(String(url));return null;};
+  document.addEventListener('click',function(event){
+    var link=event.target&&event.target.closest?event.target.closest('a'):null;
+    if(link&&link.href){event.preventDefault();ExternalLink.postMessage(link.href);}
+  },true);
+})();
+</script></body></html>
+''';
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width:320,height:50,child:WebViewWidget(controller:_controller));
+}
+
 class HomeScreen extends StatefulWidget {
   final String uid, token, email;
   const HomeScreen({super.key, required this.uid, required this.token, required this.email});
@@ -289,7 +344,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
   String _promoImageUrl = '', _promoClickUrl = '';
-  bool _promoEnabled = false;
+  String _adsterraBannerCode = '';
+  bool _promoEnabled = false, _autoBannerAdEnabled = true;
   bool _loading = true;
   String _superAdminUid = '';
   DateTime _clock = DateTime.now();
@@ -302,6 +358,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _roomAdUrlController = TextEditingController(text: 'https://example.com');
   final _promoImageUrlController = TextEditingController();
   final _promoClickUrlController = TextEditingController();
+  final _adsterraBannerCodeController = TextEditingController();
 
   @override
   void initState() {
@@ -313,7 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _matchTicker?.cancel();
-    _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose();
+    _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose(); _adsterraBannerCodeController.dispose();
     _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose();
     super.dispose();
   }
@@ -384,6 +441,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _promoImageUrl = c['promoImageUrl'] ?? '';
         _promoClickUrl = c['promoClickUrl'] ?? '';
         _promoEnabled = c['promoEnabled'] == true;
+        _adsterraBannerCode = c['adsterraBannerCode']?.toString() ?? '';
+        _autoBannerAdEnabled = c['autoBannerAdEnabled'] != false;
+        _adsterraBannerCodeController.text = _adsterraBannerCode;
         _superAdminUid = '${c['superAdminUid'] ?? ''}';
         _joinAdUrlController.text = _joinAdUrl;
         _roomAdUrlController.text = _roomAdUrl;
@@ -1074,7 +1134,10 @@ class _HomeScreenState extends State<HomeScreen> {
       'promoImageUrl': _promoImageUrl,
       'promoClickUrl': _promoClickUrl,
       'promoEnabled': _promoEnabled,
+      'adsterraBannerCode': _adsterraBannerCodeController.text.trim(),
+      'autoBannerAdEnabled': _autoBannerAdEnabled,
     };
+    _adsterraBannerCode = _adsterraBannerCodeController.text.trim();
     final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode(data));
     if (res.statusCode >= 200 && res.statusCode < 300) {
       _msg('Ad & Promo settings saved!');
@@ -1714,8 +1777,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget build(BuildContext context) {
     final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
+    final showAutoAd = !showPromo && _autoBannerAdEnabled && _adsterraBannerCode.trim().isNotEmpty;
+    final showBanner = showPromo || showAutoAd;
     final showQuickActions = isAdmin;
-    final leadingItems = (showPromo ? 1 : 0) + (showQuickActions ? 1 : 0);
+    final leadingItems = (showBanner ? 1 : 0) + (showQuickActions ? 1 : 0);
     final pages = [
       ListView.builder(
         padding: const EdgeInsets.all(12),
@@ -1740,7 +1805,17 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             );
           }
-          final quickIndex = showPromo ? 1 : 0;
+          if (showAutoAd && i == 0) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              clipBehavior: Clip.antiAlias,
+              child: Center(
+                child: SizedBox(width: 320, height: 50,
+                  child: AdsterraBanner(code: _adsterraBannerCode)),
+              ),
+            );
+          }
+          final quickIndex = showBanner ? 1 : 0;
           if (showQuickActions && i == quickIndex) return _adminQuickActions();
           final m = _matches[i - leadingItems],
               joined = m['isJoined'] == true,
@@ -1914,6 +1989,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 TextField(controller: _promoImageUrlController, decoration: const InputDecoration(labelText: 'Promo Image URL')),
                 const SizedBox(height: 8),
                 TextField(controller: _promoClickUrlController, decoration: const InputDecoration(labelText: 'Promo Click URL')),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _adsterraBannerCodeController,
+                  minLines: 4,
+                  maxLines: 8,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    labelText: 'Adsterra Banner Code / Key (320×50)',
+                    hintText: 'Paste the complete Adsterra HTML / JavaScript banner code',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Auto Banner Ad ON / OFF'),
+                  subtitle: const Text('Personal promo ON hone par automatic banner hide rahega.'),
+                  value: _autoBannerAdEnabled,
+                  onChanged: (v) => setState(() => _autoBannerAdEnabled = v),
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Top Promo Banner ON / OFF'),
