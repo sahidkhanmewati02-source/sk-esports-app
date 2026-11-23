@@ -1203,7 +1203,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final found = !privileged && badWords.any((w) => RegExp(r'(^|[^a-z])' + RegExp.escape(w) + r'([^a-z]|$)', caseSensitive:false).hasMatch(msg));
     if (found) {
       final strikes = _num(mod['strikes']) + 1;
-      final strikes = _num(mod['strikes']) + 1;
       if (strikes == 1) return _msg('Warning 1/3: abusive language allowed nahi hai.');
       return _msg('Abusive language allowed nahi hai. Agla message bhejne se pehle language change karein.');
     }
