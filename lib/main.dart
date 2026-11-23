@@ -1118,11 +1118,105 @@ class _HomeScreenState extends State<HomeScreen> {
     final res = await http.patch(Uri.parse('$kDbUrl/users/' + user['uid'].toString() + '.json?auth=' + widget.token), body: jsonEncode({'role': make ? 'coadmin' : 'player'}));
     if (res.statusCode >= 200 && res.statusCode < 300) { _msg(make ? 'Co-Admin bana diya.' : 'Co-Admin role hata diya.'); _sync(); } else _msg('Role update nahi hua. Firebase Rules check karein.');
   }
-  Widget _roleManagementCard() => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    const Text('CO-ADMIN MANAGEMENT', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
-    const SizedBox(height: 6),
-    ..._users.where((u) => u['email']?.toString().toLowerCase() != kAdmin.toLowerCase()).map((u) => ListTile(dense: true, title: Text(u['ign']?.toString() ?? 'Player'), subtitle: Text(u['email']?.toString() ?? ''), trailing: TextButton(onPressed: () => _toggleCoAdmin(u), child: Text(u['role'] == 'coadmin' ? 'Remove' : 'Make Co-Admin')))),
-  ])));
+  int get _activeCoAdminCount => _users.where((u) => u['email']?.toString().toLowerCase() != kAdmin.toLowerCase() && u['role'] == 'coadmin').length;
+
+  Widget _roleManagementCard() => SizedBox(
+    width: 150,
+    child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog),
+  );
+
+  void _showCoAdminDialog() {
+    if (!isSuperAdmin) return;
+    final searchC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final q = searchC.text.trim().toLowerCase();
+          final filtered = _users.where((u) {
+            if (u['email']?.toString().toLowerCase() == kAdmin.toLowerCase()) return false;
+            final ign = (u['ign'] ?? '').toString().toLowerCase();
+            final email = (u['email'] ?? '').toString().toLowerCase();
+            final bgmiId = (u['bgmiId'] ?? '').toString().toLowerCase();
+            return q.isEmpty || ign.contains(q) || email.contains(q) || bgmiId.contains(q);
+          }).toList();
+          final active = _activeCoAdminCount;
+          return AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            title: Text('Co-Admin Management ($active)', style: const TextStyle(fontSize: 16)),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 440,
+              child: Column(
+                children: [
+                  TextField(
+                    controller: searchC,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Search Name, IGN, Email or BGMI ID...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? const Center(child: Text('Koi player nahi mila'))
+                        : ListView.builder(
+                            itemCount: filtered.length,
+                            itemBuilder: (_, i) {
+                              final u = filtered[i];
+                              final isCoAdmin = u['role'] == 'coadmin';
+                              final ign = (u['ign'] ?? 'Player').toString();
+                              final email = (u['email'] ?? '').toString();
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 7),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(child: Text(ign, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: isCoAdmin ? const Color(0xFFFF9800).withOpacity(0.18) : Colors.grey.withOpacity(0.16),
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: Text(isCoAdmin ? 'CO-ADMIN' : 'PLAYER', maxLines: 1, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: isCoAdmin ? const Color(0xFFFF9800) : Colors.grey)),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: TextButton(
+                                          onPressed: () async {
+                                            await _toggleCoAdmin(u);
+                                            if (ctx.mounted) setDialogState(() {});
+                                          },
+                                          child: Text(isCoAdmin ? 'Remove' : 'Make Co-Admin'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+          );
+        },
+      ),
+    ).then((_) => searchC.dispose());
+  }
   void _join(Map m) {
     final ignC = TextEditingController(text: _ign),
         idC = TextEditingController(text: _bgmiId == 'Not Set' ? '' : _bgmiId);
