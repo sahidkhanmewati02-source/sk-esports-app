@@ -1975,7 +1975,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
                         ),
                         const SizedBox(width: 6),
-                        OutlinedButton.icon(
+                        if (isSuperAdmin) OutlinedButton.icon(
                           onPressed: () => _showMatchHisaab(m),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: const Color(0xFF00E676),
