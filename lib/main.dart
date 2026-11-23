@@ -759,11 +759,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
     final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     final t = {'title': title, 'sub': '$sub • $dt', 'amt': amt, 'status': status, 'time': dt};
-    if (uid == widget.uid) setState(() => _txns.insert(0, t));
-    final walletRes = await http.patch(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'), body: jsonEncode({'wallet': bal}));
-    if (walletRes.statusCode < 200 || walletRes.statusCode >= 300) throw Exception('Wallet update failed (${walletRes.statusCode}). Firebase Rules check karein.');
-    final txnRes = await http.post(Uri.parse('$kDbUrl/users/$uid/txns.json?auth=${widget.token}'), body: jsonEncode(t));
-    if (txnRes.statusCode < 200 || txnRes.statusCode >= 300) throw Exception('Transaction history save nahi hui (${txnRes.statusCode}).');
+    final txnId = now.microsecondsSinceEpoch.toString();
+    final patch = <String, dynamic>{
+      'users/$uid/wallet': bal,
+      'users/$uid/txns/$txnId': t,
+    };
+    final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Wallet/transaction atomic update failed (${res.statusCode}). Firebase Rules check karein.');
+    if (uid == widget.uid && mounted) setState(() { _wallet = bal; _txns.insert(0, {'id': txnId, ...t}); });
   }
 
 
@@ -827,9 +830,22 @@ class _HomeScreenState extends State<HomeScreen> {
         return Card(child: ListTile(title: Text('${d['ign']} • ₹${d['amt']}'), subtitle: Text('UTR: ${d['utr']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
             if (!isSuperAdmin) return _msg('Deposit approve karne ka access sirf Super Admin ko hai.');
-            Navigator.pop(ctx); final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => {});
-            if (u.isNotEmpty) await _saveTxn('${d['uid']}', _num(u['wallet']) + _num(d['amt']), 'Wallet Deposit', 'UTR: ${d['utr']}', _num(d['amt']), 'APPROVED');
-            await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'APPROVED'})); _msg('Approved!'); _sync();
+            Navigator.pop(ctx);
+            final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => {});
+            if (u.isEmpty) return _msg('Player wallet record nahi mila.');
+            final uid = d['uid'].toString();
+            final amt = _num(d['amt']);
+            final txnId = DateTime.now().microsecondsSinceEpoch.toString();
+            final now = DateTime.now();
+            final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+            final patch = <String, dynamic>{
+              'users/$uid/wallet': _num(u['wallet']) + amt,
+              'users/$uid/txns/$txnId': {'title': 'Wallet Deposit', 'sub': 'UTR: ${d['utr']} • $dt', 'amt': amt, 'status': 'APPROVED', 'time': dt},
+              'deposits/${d['id']}/status': 'APPROVED',
+            };
+            final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+            if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Deposit approval fail hui. Firebase Rules check karein.');
+            _msg('Approved!'); _sync();
           }),
           IconButton(icon: const Icon(Icons.cancel, color: Colors.redAccent), onPressed: () async { if (!isSuperAdmin) return _msg('Deposit reject karne ka access sirf Super Admin ko hai.'); Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'})); _sync(); }),
         ])));
@@ -848,17 +864,23 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(icon: const Icon(Icons.copy, color: Colors.lightBlueAccent), onPressed: () { Clipboard.setData(ClipboardData(text: '${wd['upi']}')); _msg('Player UPI Copied!'); }),
           IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
             if (!isSuperAdmin) return _msg('Withdrawal mark paid karne ka access sirf Super Admin ko hai.');
-            Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/withdrawals/${wd['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'PAID'}));
-            final tRes = await http.get(Uri.parse('$kDbUrl/users/${wd['uid']}/txns.json?auth=${widget.token}'));
-            if (tRes.statusCode == 200 && tRes.body != 'null') {
-              final tMap = jsonDecode(tRes.body) as Map<String, dynamic>;
-              for (final e in tMap.entries.toList().reversed) {
-                if (e.value is Map && e.value['title'] == 'UPI Withdrawal' && e.value['status'] == 'PENDING' && _num(e.value['amt']) == _num(wd['amt'])) {
-                  await http.patch(Uri.parse('$kDbUrl/users/${wd['uid']}/txns/${e.key}.json?auth=${widget.token}'), body: jsonEncode({'status': 'SUCCESS'})); break;
-                }
-              }
-            }
-            _msg('Marked as Paid!'); _sync();
+            Navigator.pop(ctx);
+            final uid = wd['uid'].toString();
+            final u = _users.firstWhere((e) => e['uid'] == uid, orElse: () => {});
+            final amt = _num(wd['amt']);
+            if (u.isEmpty || _num(u['wallet']) < amt) return _msg('Player wallet balance insufficient hai.');
+            final txnId = DateTime.now().microsecondsSinceEpoch.toString();
+            final now = DateTime.now();
+            final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+            final patch = <String, dynamic>{
+              'users/$uid/wallet': _num(u['wallet']) - amt,
+              'users/$uid/txns/$txnId': {'title': 'UPI Withdrawal', 'sub': wd['upi'].toString() + ' • $dt', 'amt': amt, 'status': 'PAID', 'time': dt},
+              'withdrawals/${wd['id']}/status': 'PAID',
+              'withdrawals/${wd['id']}/approvedAt': now.millisecondsSinceEpoch,
+            };
+            final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+            if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Withdrawal approval fail hui. Firebase Rules check karein.');
+            _msg('Marked Paid; wallet deduction aur txn save hue.'); _sync();
           }),
         ])));
       })),
@@ -1404,20 +1426,39 @@ class _HomeScreenState extends State<HomeScreen> {
               final oldBalance = _wallet;
               Navigator.pop(ctx);
               try {
+                final now = DateTime.now();
                 final playerBalance = oldBalance - fee;
-                final pRes = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': playerBalance, 'ign': ignC.text.trim(), 'bgmiId': idC.text.trim()}));
-                if (pRes.statusCode < 200 || pRes.statusCode >= 300) throw Exception('Player wallet update fail hua.');
-                await _saveTxn(widget.uid, playerBalance, 'Joined: ${m['title']}', 'Entry fee added to match collection', fee, 'PAID');
-                final mr = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'joined': j}));
-                final pr = await http.put(Uri.parse('$kDbUrl/matches/${m['id']}/players/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'ign': ignC.text.trim(), 'bgmiId': idC.text.trim(), 'joinedAt': DateTime.now().millisecondsSinceEpoch, 'feePaid': fee}));
-                if (mr.statusCode < 200 || mr.statusCode >= 300 || pr.statusCode < 200 || pr.statusCode >= 300) {
-                  await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': oldBalance}));
-                  throw Exception('Registration save nahi hui; player wallet refund kar diya.');
-                }
-                await _addMatchCollection(m['id'].toString(), m['title'].toString(), fee);
-                if (mounted) setState(() { _ign = ignC.text.trim(); _bgmiId = idC.text.trim(); _wallet = playerBalance; m['joined'] = j; m['isJoined'] = true; });
-                _msg('Slot Confirmed! Entry fee match collection mein add ho gayi.');
-              } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
+                final txnId = now.microsecondsSinceEpoch.toString();
+                final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+                final txn = {'title': 'Joined: ${m['title']}', 'sub': 'Entry fee added to match collection • $dt', 'amt': fee, 'status': 'PAID', 'time': dt};
+                final patch = <String, dynamic>{
+                  'users/${widget.uid}/wallet': playerBalance,
+                  'users/${widget.uid}/ign': ignC.text.trim(),
+                  'users/${widget.uid}/bgmiId': idC.text.trim(),
+                  'users/${widget.uid}/txns/$txnId': txn,
+                  'matches/${m['id']}/players/${widget.uid}': {
+                    'ign': ignC.text.trim(),
+                    'bgmiId': idC.text.trim(),
+                    'joinedAt': now.millisecondsSinceEpoch,
+                    'feePaid': fee,
+                  },
+                  'matches/${m['id']}/joined': {'.sv': {'increment': 1}},
+                };
+                final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+                if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}). Wallet/slot update nahi hua.');
+                if (mounted) setState(() {
+                  _ign = ignC.text.trim();
+                  _bgmiId = idC.text.trim();
+                  _wallet = playerBalance;
+                  _txns.insert(0, {'id': txnId, ...txn});
+                  m['joined'] = j;
+                  m['isJoined'] = true;
+                  final players = m['players'] is Map ? Map<String,dynamic>.from(m['players']) : <String,dynamic>{};
+                  players[widget.uid] = {'ign': _ign, 'bgmiId': _bgmiId, 'joinedAt': now.millisecondsSinceEpoch, 'feePaid': fee};
+                  m['players'] = players;
+                });
+                _msg('Slot Confirmed! Wallet, roster aur transaction ek saath save hue.');
+              }              } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
             },
             child: Text('Pay ₹${m['fee']}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
@@ -1489,27 +1530,25 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (!RegExp(r'^\d{12}$').hasMatch(utr)) {
                           return _msg('Sahi 12-Digit UTR dalein!');
                         }
-                        final chk = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
-                        if (chk.statusCode == 200 && chk.body != 'null') {
-                          final allDeps = jsonDecode(chk.body) as Map<String, dynamic>;
-                          if (allDeps.values.any((d) => d is Map && d['utr']?.toString() == utr && d['status'] != 'REJECTED')) {
-                            return _msg('Ye UTR pehle hi use ho chuka hai!');
-                          }
+                        final depositId = DateTime.now().microsecondsSinceEpoch.toString();
+                        final now = DateTime.now().millisecondsSinceEpoch;
+                        final patch = <String, dynamic>{
+                          'usedUtrs/$utr': {'uid': widget.uid, 'depositId': depositId, 'createdAt': now},
+                          'deposits/$depositId': {
+                            'uid': widget.uid,
+                            'ign': _ign,
+                            'amt': amt,
+                            'utr': utr,
+                            'status': 'PENDING',
+                            'createdAt': now,
+                          },
+                        };
+                        Navigator.pop(ctx);
+                        final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+                        if (res.statusCode < 200 || res.statusCode >= 300) {
+                          return _msg('UTR submit nahi hua. Ho sakta hai ye UTR pehle use ho chuka ho.');
                         }
-
-                  Navigator.pop(ctx);
-                  await _saveTxn(widget.uid, _wallet, 'Deposit Request', 'UTR: ${utrC.text.trim()}', amt, 'PENDING');
-                  await http.post(
-                    Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'),
-                    body: jsonEncode({
-                      'uid': widget.uid,
-                      'ign': _ign,
-                      'amt': amt,
-                      'utr': utrC.text.trim(),
-                      'status': 'PENDING',
-                    }),
-                  );
-                  _msg('UTR Submitted! Admin verify karte hi add hoga.');
+                        _msg('UTR Submitted! Admin verify karte hi wallet mein add hoga.');
                 },
                 child: const Text('Submit UTR', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
               ),
@@ -1540,19 +1579,21 @@ class _HomeScreenState extends State<HomeScreen> {
               if (!upiC.text.contains('@') || (v - 50).isNegative || (_wallet - v).isNegative) {
                 return _msg('Valid UPI aur balance check karein!');
               }
-              setState(() => _wallet = _wallet - v);
+              final requestId = DateTime.now().microsecondsSinceEpoch.toString();
               Navigator.pop(ctx);
-              await _saveTxn(widget.uid, _wallet, 'UPI Withdrawal', upiC.text.trim(), v, 'PENDING');
-              await http.post(
-                Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'),
-                body: jsonEncode({'uid': widget.uid,
+              final res = await http.put(
+                Uri.parse('$kDbUrl/withdrawals/$requestId.json?auth=${widget.token}'),
+                body: jsonEncode({
+                  'uid': widget.uid,
                   'ign': _ign,
                   'upi': upiC.text.trim(),
                   'amt': v,
                   'status': 'PENDING',
+                  'createdAt': DateTime.now().millisecondsSinceEpoch,
                 }),
               );
-              _msg('Withdrawal Sent!');
+              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Withdrawal request save nahi hui.');
+              _msg('Withdrawal request bhej di. Wallet deduction Super Admin approval par hoga.');
             },
             child: const Text('Withdraw', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
