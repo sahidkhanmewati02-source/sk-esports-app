@@ -1027,7 +1027,37 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       showDialog(context: context, builder: (ctx) => AlertDialog(
         title: const Text('Match Room Details'),
-        content: SelectableText('Room ID: ${m['rId']}\nPassword: ${m['rPass']}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(child: SelectableText('Room ID: ${m['rId']}')),
+                TextButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: '${m['rId'] ?? ''}'));
+                    if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Room ID copied!')));
+                  },
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy'),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: SelectableText('Password: ${m['rPass']}')),
+                TextButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: '${m['rPass'] ?? ''}'));
+                    if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Password copied!')));
+                  },
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy'),
+                ),
+              ],
+            ),
+          ],
+        ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
       ));
     });
