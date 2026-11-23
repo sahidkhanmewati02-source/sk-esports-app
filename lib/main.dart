@@ -1187,10 +1187,15 @@ class _HomeScreenState extends State<HomeScreen> {
     if (res.statusCode >= 200 && res.statusCode < 300) await _loadChat(); else _msg('Chat action failed. Firebase Rules check karein.');
   }
   Widget _chatPage() {
-    final sorted = [..._chatMessages]..sort((a,b) { final p = (b['pinned'] == true ? 1 : 0).compareTo(a['pinned'] == true ? 1 : 0); return p != 0 ? p : _num(a['createdAt']).compareTo(_num(b['createdAt'])); });
+    // reverse:true ke saath newest message index 0 par rakhein.
+    final sorted = [..._chatMessages]..sort((a,b) => _num(b['createdAt']).compareTo(_num(a['createdAt'])));
     return Column(children: [
       Padding(padding: const EdgeInsets.all(10), child: Row(children: [const Expanded(child: Text('SK ESPORTS Community Chat', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))), IconButton(onPressed: _loadChat, icon: const Icon(Icons.refresh))])),
-      Expanded(child: sorted.isEmpty ? const Center(child: Text('Abhi chat khaali hai. Pehla message bhejein!')) : ListView.builder(itemCount: sorted.length, itemBuilder: (_, i) {
+      Expanded(child: sorted.isEmpty ? const Center(child: Text('Abhi chat khaali hai. Pehla message bhejein!')) : ListView.builder(
+        reverse: true,
+        shrinkWrap: false,
+        itemCount: sorted.length,
+        itemBuilder: (_, i) {
         final m = sorted[i];
         final ign = m['ign']?.toString() ?? 'Player';
         return Card(child: ListTile(
