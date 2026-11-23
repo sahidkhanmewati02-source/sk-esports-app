@@ -287,6 +287,7 @@ class _AdsterraBannerState extends State<AdsterraBanner> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF121212))
       ..addJavaScriptChannel('ExternalLink', onMessageReceived: (message) async {
         final uri = Uri.tryParse(message.message);
         if (uri != null && (uri.scheme == 'https' || uri.scheme == 'http')) {
@@ -304,7 +305,7 @@ class _AdsterraBannerState extends State<AdsterraBanner> {
           return NavigationDecision.navigate;
         },
       ))
-      ..loadHtmlString(_buildAdHtml(widget.code));
+      ..loadHtmlString(_buildAdHtml(widget.code), baseUrl: 'https://sahidkhanmewati02-source.github.io');
   }
   String _buildAdHtml(String code) => '''
 <!doctype html><html><head>
@@ -312,7 +313,7 @@ class _AdsterraBannerState extends State<AdsterraBanner> {
 <style>
 html,body{margin:0;padding:0;width:320px;height:50px;overflow:hidden;background:transparent}
 #ad-slot{width:320px;height:50px;overflow:hidden;display:flex;align-items:center;justify-content:center}
-</style></head><body>
+</style></head><body style="margin:0;padding:0;background:transparent;display:flex;justify-content:center;align-items:center;">
 <div id="ad-slot">$code</div>
 <script>
 (function(){
