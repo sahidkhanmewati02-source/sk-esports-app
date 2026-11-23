@@ -607,6 +607,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addMatchPrize(String matchId, String title, int amount) async {
+    if (!isSuperAdmin) throw Exception('Prize sirf Super Admin bhej sakta hai.');
     final data = await _readMatchHisaab(matchId, title);
     if (data['settled'] == true) throw Exception('Match settled hai; prize entry lock hai.');
     final total = _num(data['prizeSent']) + amount;
@@ -818,17 +819,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (res.statusCode >= 200 && res.statusCode < 300) { setState(() => m['hold'] = hold); _msg(hold ? 'Match HOLD par hai; room release ruk gaya.' : 'Match resume kar diya.'); } else { _msg('Hold status save nahi hua.'); }
   }
   void _showPendingDepositsDialog() {
+    if (!isSuperAdmin) return _msg('Deposits sirf Super Admin manage kar sakta hai.');
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontSize: 15)),
       content: SizedBox(width: double.maxFinite, height: 350, child: _deps.isEmpty ? const Center(child: Text('Koi pending deposit nahi hai')) : ListView.builder(itemCount: _deps.length, itemBuilder: (_, i) {
         final d = _deps[i];
         return Card(child: ListTile(title: Text('${d['ign']} • ₹${d['amt']}'), subtitle: Text('UTR: ${d['utr']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
+            if (!isSuperAdmin) return _msg('Deposit approve karne ka access sirf Super Admin ko hai.');
             Navigator.pop(ctx); final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => {});
             if (u.isNotEmpty) await _saveTxn('${d['uid']}', _num(u['wallet']) + _num(d['amt']), 'Wallet Deposit', 'UTR: ${d['utr']}', _num(d['amt']), 'APPROVED');
             await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'APPROVED'})); _msg('Approved!'); _sync();
           }),
-          IconButton(icon: const Icon(Icons.cancel, color: Colors.redAccent), onPressed: () async { Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'})); _sync(); }),
+          IconButton(icon: const Icon(Icons.cancel, color: Colors.redAccent), onPressed: () async { if (!isSuperAdmin) return _msg('Deposit reject karne ka access sirf Super Admin ko hai.'); Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'})); _sync(); }),
         ])));
       })),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
@@ -836,6 +839,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showPendingWithdrawalsDialog() {
+    if (!isSuperAdmin) return _msg('Withdrawals sirf Super Admin manage kar sakta hai.');
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontSize: 15)),
       content: SizedBox(width: double.maxFinite, height: 350, child: _withs.isEmpty ? const Center(child: Text('Koi pending withdrawal nahi hai')) : ListView.builder(itemCount: _withs.length, itemBuilder: (_, i) {
@@ -843,6 +847,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return Card(child: ListTile(title: Text('${wd['ign']} • ₹${wd['amt']}'), subtitle: Text('UPI: ${wd['upi']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(icon: const Icon(Icons.copy, color: Colors.lightBlueAccent), onPressed: () { Clipboard.setData(ClipboardData(text: '${wd['upi']}')); _msg('Player UPI Copied!'); }),
           IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
+            if (!isSuperAdmin) return _msg('Withdrawal mark paid karne ka access sirf Super Admin ko hai.');
             Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/withdrawals/${wd['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'PAID'}));
             final tRes = await http.get(Uri.parse('$kDbUrl/users/${wd['uid']}/txns.json?auth=${widget.token}'));
             if (tRes.statusCode == 200 && tRes.body != 'null') {
@@ -869,8 +874,8 @@ class _HomeScreenState extends State<HomeScreen> {
         spacing: 6,
         runSpacing: 6,
         children: [
-          SizedBox(width: width, child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
-          SizedBox(width: width, child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
+          if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
+          if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
           SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
           if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog)),
           SizedBox(width: width, child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
@@ -887,6 +892,7 @@ class _HomeScreenState extends State<HomeScreen> {
   ));
 
   void _showAllPlayersDialog() {
+    if (!isAdmin) return;
     final searchC = TextEditingController();
     showDialog(
       context: context,
@@ -967,7 +973,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       const SizedBox(height: 7),
                                       Row(
                                         children: [
-                                          Expanded(
+                                          if (isSuperAdmin) Expanded(
                                             child: TextButton.icon(
                                               style: TextButton.styleFrom(
                                                 foregroundColor: const Color(0xFF00E676),
@@ -993,7 +999,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                               onPressed: () => _showHistory(u),
                                             ),
                                           ),
-                                          Expanded(
+                                          if (isSuperAdmin) Expanded(
                                             child: TextButton.icon(
                                               style: TextButton.styleFrom(
                                                 foregroundColor: const Color(0xFFFF9800),
@@ -1619,7 +1625,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _addManualBalance(Map u) {
-    if (!isAdmin) return _msg('Sirf Super Admin / Co-Admin balance add kar sakte hain.');
+    if (!isSuperAdmin) return _msg('Add Balance ka access sirf Super Admin ko hai.');
     final amountC = TextEditingController();
     final reasonC = TextEditingController(text: 'Manual Bonus / Refund');
     final uid = (u['uid'] ?? '').toString();
@@ -1638,6 +1644,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () async {
+              if (!isSuperAdmin) return _msg('Add Balance ka access sirf Super Admin ko hai.');
               final amount = _num(amountC.text.trim());
               final reason = reasonC.text.trim();
               if (amount <= 0 || reason.isEmpty) return _msg('Valid amount aur reason dalein.');
@@ -1662,6 +1669,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
   void _sendPrize(Map u, {Map? match}) {
+    if (!isSuperAdmin) return _msg('Prize bhejne ka access sirf Super Admin ko hai.');
     final amtC = TextEditingController(), noteC = TextEditingController(text: 'Winning Prize');
     final uid = u['uid'].toString();
     final eligible = match != null ? [match] : _matches.where((m) => m['players'] is Map && (m['players'] as Map).containsKey(uid)).toList();
@@ -1686,6 +1694,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
             onPressed: () async {
+              if (!isSuperAdmin) return _msg('Prize bhejne ka access sirf Super Admin ko hai.');
               final add = _num(amtC.text);
               if (add <= 0) return _msg('Valid prize amount dalein.');
               final chosen = eligible.firstWhere((m) => m['id'].toString() == selectedId);
@@ -1729,14 +1738,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       contentPadding: EdgeInsets.zero,
                       title: Text('${i + 1}. ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       subtitle: Text('ID: ${p['bgmiId'] ?? '-'}', style: const TextStyle(fontSize: 12)),
-                      trailing: ElevatedButton(
+                      trailing: isSuperAdmin ? ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 10)),
                         onPressed: () {
                           Navigator.pop(ctx);
                           _sendPrize(u, match: m);
                         },
                         child: const Text('Send Prize', style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
+                      ) : null,
                     );
                   },
                 ),
