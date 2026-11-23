@@ -1099,7 +1099,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
             onPressed: () async {
-              if (ignC.text.trim().isEmpty || idC.text.trim().length < 10 || idC.text.trim().length > 11 || !RegExp(r'^\d+
+              if (ignC.text.trim().isEmpty || idC.text.trim().length < 10 || idC.text.trim().length > 11 || !RegExp(r'^\d+$').hasMatch(idC.text.trim())) {
+                return _msg('Sahi IGN aur BGMI ID dalein (10 se 11 digits)!');
+              }
               if (_matchClosed(m) || _num(m['joined']) >= _num(m['slots'])) { Navigator.pop(ctx); return _msg('Join band ho chuka hai ya slots full hain.'); }
               final fee = _num(m['fee']);
               if ((_wallet - fee).isNegative) {
