@@ -204,35 +204,6 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  @override
-  Widget _paymentSettingsCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('PAYMENT METHOD / UPI DETAILS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-          const SizedBox(height: 8),
-          TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
-            onPressed: () async {
-              _upiId = _upiC.text.trim();
-              _qrUrl = _qrC.text.trim();
-              final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
-              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Payment details save nahi hue.');
-              _msg('New Payment QR Live!');
-              if (mounted) setState(() {});
-            },
-            child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ]),
-      ),
-    );
-  }
-
   Widget build(BuildContext context) {
     if (_checking) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFFFF9800))));
@@ -1582,6 +1553,36 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  @override
+  Widget _paymentSettingsCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('PAYMENT METHOD / UPI DETAILS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+          const SizedBox(height: 8),
+          TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
+            onPressed: () async {
+              _upiId = _upiC.text.trim();
+              _qrUrl = _qrC.text.trim();
+              final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
+              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Payment details save nahi hue.');
+              _msg('New Payment QR Live!');
+              if (mounted) setState(() {});
+            },
+            child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ]),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
