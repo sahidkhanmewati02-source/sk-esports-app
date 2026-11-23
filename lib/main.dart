@@ -634,19 +634,23 @@ class _HomeScreenState extends State<HomeScreen> {
       if (walletRes.statusCode != 200 || walletRes.body == 'null') throw Exception('Super Admin wallet read nahi hua.');
       final userData = jsonDecode(walletRes.body) as Map;
       final newBalance = _num(userData['wallet']) + availableProfit;
-      final credit = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'wallet': newBalance}));
-      if (credit.statusCode < 200 || credit.statusCode >= 300) throw Exception('Main wallet credit fail hua.');
-      await _saveTxn(widget.uid, newBalance, 'Match Profit Transfer', '${data['title'] ?? account['title']}', availableProfit, 'CREDITED');
+      final txnId = DateTime.now().microsecondsSinceEpoch.toString();
+      final now = DateTime.now();
+      final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
       final newTransferred = alreadyTransferred + availableProfit;
       final fullyTransferred = newTransferred >= netProfit;
-      final settle = await http.patch(Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${widget.token}'), body: jsonEncode({
-        'transferred': fullyTransferred,
-        'transferredAmount': newTransferred,
-        'transferredAt': DateTime.now().millisecondsSinceEpoch,
-        'settled': fullyTransferred,
-        'status': fullyTransferred ? 'Settled ✅' : 'PARTIALLY TRANSFERRED',
-      }));
-      if (settle.statusCode < 200 || settle.statusCode >= 300) throw Exception('Wallet credit ho gaya, lekin transfer status save nahi hua. Dobara transfer na karein; record check karein.');
+      final patch = <String, dynamic>{
+        'users/${widget.uid}/wallet': newBalance,
+        'users/${widget.uid}/txns/$txnId': {'title': 'Match Profit Transfer', 'sub': '${data['title'] ?? account['title']} • $dt', 'amt': availableProfit, 'status': 'CREDITED', 'time': dt},
+        'match_hisaab/$id/transferred': fullyTransferred,
+        'match_hisaab/$id/transferredAmount': newTransferred,
+        'match_hisaab/$id/transferredAt': now.millisecondsSinceEpoch,
+        'match_hisaab/$id/settled': fullyTransferred,
+        'match_hisaab/$id/status': fullyTransferred ? 'Settled ✅' : 'PARTIALLY TRANSFERRED',
+      };
+      final transferRes = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+      if (transferRes.statusCode < 200 || transferRes.statusCode >= 300) throw Exception('Profit transfer atomic update fail hua (${transferRes.statusCode}). Wallet/settlement update nahi hua.');
+      if (mounted) setState(() { _wallet = newBalance; _txns.insert(0, {'id': txnId, 'title': 'Match Profit Transfer', 'sub': '${data['title'] ?? account['title']} • $dt', 'amt': availableProfit, 'status': 'CREDITED', 'time': dt}); });
       _msg('₹$availableProfit main wallet mein transfer ho gaya.');
       await _sync();
     } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
@@ -1199,11 +1203,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final found = !privileged && badWords.any((w) => RegExp(r'(^|[^a-z])' + RegExp.escape(w) + r'([^a-z]|$)', caseSensitive:false).hasMatch(msg));
     if (found) {
       final strikes = _num(mod['strikes']) + 1;
-      final muteMs = strikes == 2 ? 15 * 60 * 1000 : (strikes >= 3 ? 2 * 60 * 60 * 1000 : 0);
-      await http.patch(Uri.parse('$kDbUrl/chatModeration/' + widget.uid + '.json?auth=' + widget.token), body: jsonEncode({'strikes': strikes, 'muteUntil': muteMs == 0 ? 0 : DateTime.now().millisecondsSinceEpoch + muteMs}));
+      final strikes = _num(mod['strikes']) + 1;
       if (strikes == 1) return _msg('Warning 1/3: abusive language allowed nahi hai.');
-      if (strikes == 2) return _msg('2nd violation: 15 minute mute laga diya gaya.');
-      return _msg('3rd violation: 2 ghante ka mute laga diya gaya.');
+      return _msg('Abusive language allowed nahi hai. Agla message bhejne se pehle language change karein.');
     }
     final data = {'uid': widget.uid, 'ign': _ign, 'email': widget.email, 'message': msg, 'createdAt': DateTime.now().millisecondsSinceEpoch, 'pinned': false, 'role': isSuperAdmin ? 'superadmin' : (_isCoAdmin ? 'coadmin' : 'player')};
     final res = await http.post(Uri.parse('$kDbUrl/chat.json?auth=' + widget.token), body: jsonEncode(data));
@@ -1230,7 +1232,7 @@ class _HomeScreenState extends State<HomeScreen> {
           leading: CircleAvatar(child: Text(ign.isNotEmpty ? ign[0].toUpperCase() : 'P')),
           title: Row(children: [Expanded(child: Text(ign, style: const TextStyle(fontWeight: FontWeight.bold))), if (m['pinned'] == true) const Icon(Icons.push_pin, color: Colors.amber, size: 16)]),
           subtitle: Text(m['message']?.toString() ?? ''),
-          trailing: isAdmin ? PopupMenuButton<String>(onSelected: (v) => _chatAction(m, v), itemBuilder: (_) => [PopupMenuItem(value: 'pin', child: Text(m['pinned'] == true ? 'Unpin' : 'Pin')), const PopupMenuItem(value: 'delete', child: Text('Delete'))]) : null,
+          trailing: isSuperAdmin ? PopupMenuButton<String>(onSelected: (v) => _chatAction(m, v), itemBuilder: (_) => [PopupMenuItem(value: 'pin', child: Text(m['pinned'] == true ? 'Unpin' : 'Pin')), const PopupMenuItem(value: 'delete', child: Text('Delete'))]) : null,
         ));
       })),
       SafeArea(child: Padding(padding: const EdgeInsets.all(10), child: Row(children: [Expanded(child: TextField(controller: _chatC, minLines: 1, maxLines: 4, decoration: const InputDecoration(hintText: 'Message as BGMI IGN', border: OutlineInputBorder()))), const SizedBox(width: 8), IconButton(onPressed: _sendChat, icon: const Icon(Icons.send, color: Color(0xFFFF9800)))]))),
@@ -1458,7 +1460,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   m['players'] = players;
                 });
                 _msg('Slot Confirmed! Wallet, roster aur transaction ek saath save hue.');
-              }              } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
+              } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
             },
             child: Text('Pay ₹${m['fee']}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
