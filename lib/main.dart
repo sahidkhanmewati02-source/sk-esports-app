@@ -379,6 +379,24 @@ class _HomeScreenState extends State<HomeScreen> {
   void _msg(String s) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
   int _num(dynamic v) => int.tryParse('$v') ?? 0;
+
+  int _matchStartTimestamp(Map m) {
+    final direct = _num(m['startAt'] ?? m['startTime'] ?? m['scheduledAt']);
+    if (direct > 0) return direct < 100000000000 ? direct * 1000 : direct;
+    final raw = (m['startDateTime'] ?? m['scheduledDateTime'] ?? m['time'] ?? '').toString().trim();
+    final parsed = DateTime.tryParse(raw.replaceFirst(' ', 'T'));
+    return parsed?.millisecondsSinceEpoch ?? 0x7fffffffffffffff;
+  }
+
+  int _compareMatches(Map a, Map b) {
+    final aDone = _isMatchCompleted(a), bDone = _isMatchCompleted(b);
+    if (aDone != bDone) return aDone ? 1 : -1;
+    final byStart = _matchStartTimestamp(a).compareTo(_matchStartTimestamp(b));
+    if (byStart != 0) return byStart;
+    return _num(b['createdAt']).compareTo(_num(a['createdAt']));
+  }
+
+  void _sortMatches() => _matches.sort((a, b) => _compareMatches(a as Map, b as Map));
   int _matchPlayerCount(Map m) {
     final players = m['players'];
     if (players is Map) return players.length;
@@ -483,6 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
         _matches = list;
+        _sortMatches();
       } else {
         final def = {'m1': {
             'title': 'SK ESPORTS Solo Rush #1',
@@ -500,6 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
         };
         await http.put(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'), body: jsonEncode(def));
         _matches = [{'id': 'm1', ...def['m1']!, 'isJoined': false}];
+        _sortMatches();
       }
 
       if (isSuperAdmin) {
@@ -828,7 +848,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (st == null || rm == null) return _msg('Date/time select karein.');
       final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': st.millisecondsSinceEpoch, 'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds, 'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch})};
       final res = await http.patch(Uri.parse('$kDbUrl/matches/' + m['id'].toString() + '.json?auth=' + widget.token), body: jsonEncode(data));
-      if (res.statusCode >= 200 && res.statusCode < 300) { m.addAll(data); if (mounted) setState(() {}); Navigator.pop(ctx); _msg('Match date/time aur auto-close update ho gaya.'); } else { _msg('Timer save nahi hua. Firebase Rules check karein.'); }
+      if (res.statusCode >= 200 && res.statusCode < 300) { m.addAll(data); if (mounted) setState(() => _sortMatches()); Navigator.pop(ctx); _msg('Match date/time aur auto-close update ho gaya.'); } else { _msg('Timer save nahi hua. Firebase Rules check karein.'); }
     }, child: const Text('Save Timer'))]));
   }
   Future<void> _toggleMatchHold(Map m) async {
@@ -922,7 +942,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: jsonEncode({'status': 'COMPLETED', 'completed': true, 'completedAt': DateTime.now().millisecondsSinceEpoch}),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      if (mounted) setState(() { m['status'] = 'COMPLETED'; m['completed'] = true; });
+      if (mounted) setState(() { m['status'] = 'COMPLETED'; m['completed'] = true; _sortMatches(); });
       _msg('Match COMPLETED mark ho gaya.');
     } else {
       _msg('Match complete mark nahi hua. Firebase Rules check karein.');
@@ -1756,6 +1776,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   'mode': modeC.text.trim(),
                   'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch}),
                   'startAt': st.millisecondsSinceEpoch,
+                  'createdAt': DateTime.now().millisecondsSinceEpoch,
                   'closeAt': st.millisecondsSinceEpoch,
                   'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds,
                   'hold': false,
