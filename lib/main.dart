@@ -930,7 +930,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _adminQuickActions() {
     final width = (MediaQuery.of(context).size.width - 44) / 3;
-    final completed = _matches.where(_isMatchCompleted).toList()
+    final completed = _matches.where((dynamic m) => m is Map && _isMatchCompleted(m)).map((dynamic m) => m as Map).toList()
       ..sort((a, b) => _num(b['startAt']).compareTo(_num(a['startAt'])));
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
