@@ -798,7 +798,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   bool _matchClosed(Map m) { final c = _num(m['closeAt']); return m['status'] == 'CLOSED' || (c > 0 && _clock.millisecondsSinceEpoch >= c); }
-  bool _roomAvailable(Map m) { final r = _num(m['roomReleaseAt']); return m['hold'] != true && (r <= 0 || _clock.millisecondsSinceEpoch >= r); }
+  bool _isMatchCompleted(Map m) => m['status'] == 'COMPLETED' || m['completed'] == true;
+  int _roomReleaseTime(Map m) {
+    final start = _num(m['startAt']);
+    if (start > 0) return start - const Duration(minutes: 15).inMilliseconds;
+    return _num(m['roomReleaseAt']);
+  }
+  bool _roomAvailable(Map m) {
+    final releaseAt = _roomReleaseTime(m);
+    final hasRoom = (m['rId'] ?? '').toString().trim().isNotEmpty && (m['rPass'] ?? '').toString().trim().isNotEmpty;
+    return m['hold'] != true && hasRoom && releaseAt > 0 && _clock.millisecondsSinceEpoch >= releaseAt;
+  }
   String _timeLabel(dynamic raw) { final ms = _num(raw); if (ms <= 0) return 'Not set'; final d = DateTime.fromMillisecondsSinceEpoch(ms); return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}'; }
 
   void _editMatchTiming(Map m) {
@@ -815,7 +825,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), ElevatedButton(onPressed: () async {
       final st = DateTime.tryParse(startC.text.trim().replaceFirst(' ', 'T')), rm = DateTime.tryParse(roomC.text.trim().replaceFirst(' ', 'T'));
       if (st == null || rm == null) return _msg('Date/time select karein.');
-      final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': st.millisecondsSinceEpoch, 'roomReleaseAt': rm.millisecondsSinceEpoch, 'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch})};
+      final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': st.millisecondsSinceEpoch, 'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds, 'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch})};
       final res = await http.patch(Uri.parse('$kDbUrl/matches/' + m['id'].toString() + '.json?auth=' + widget.token), body: jsonEncode(data));
       if (res.statusCode >= 200 && res.statusCode < 300) { m.addAll(data); if (mounted) setState(() {}); Navigator.pop(ctx); _msg('Match date/time aur auto-close update ho gaya.'); } else { _msg('Timer save nahi hua. Firebase Rules check karein.'); }
     }, child: const Text('Save Timer'))]));
@@ -892,8 +902,36 @@ class _HomeScreenState extends State<HomeScreen> {
     ));
   }
 
+  Future<void> _markMatchCompleted(Map m) async {
+    if (!isAdmin || _isMatchCompleted(m)) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Mark Match Completed?'),
+        content: Text('${m['title'] ?? 'Match'} ko completed mark karna hai?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mark Completed')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final res = await http.patch(
+      Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'),
+      body: jsonEncode({'status': 'COMPLETED', 'completed': true, 'completedAt': DateTime.now().millisecondsSinceEpoch}),
+    );
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      if (mounted) setState(() { m['status'] = 'COMPLETED'; m['completed'] = true; });
+      _msg('Match COMPLETED mark ho gaya.');
+    } else {
+      _msg('Match complete mark nahi hua. Firebase Rules check karein.');
+    }
+  }
+
   Widget _adminQuickActions() {
     final width = (MediaQuery.of(context).size.width - 44) / 3;
+    final completed = _matches.where(_isMatchCompleted).toList()
+      ..sort((a, b) => _num(b['startAt']).compareTo(_num(a['startAt'])));
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Wrap(
@@ -905,14 +943,57 @@ class _HomeScreenState extends State<HomeScreen> {
           SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
           if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog)),
           SizedBox(width: width, child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
+          SizedBox(width: width, child: _quickAction(Icons.check_circle, 'Completed', completed.length, () => _showCompletedMatchesDialog(completed), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
         ],
       ),
     );
   }
 
-  Widget _quickAction(IconData icon, String label, int? count, VoidCallback onTap) => Card(margin: EdgeInsets.zero, child: InkWell(
+  void _showCompletedMatchesDialog(List<Map> completed) {
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text('Completed Matches (${completed.length})', style: const TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 440,
+        child: completed.isEmpty
+            ? const Center(child: Text('Abhi koi completed match nahi hai.'))
+            : ListView.builder(
+                itemCount: completed.length,
+                itemBuilder: (_, i) {
+                  final m = completed[i];
+                  final count = _matchPlayerCount(m);
+                  return Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${m['title'] ?? 'Match'}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        Text('${m['map'] ?? '-'} • ${m['mode'] ?? '-'}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                        Text(_smartMatchTime(m), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                        const SizedBox(height: 6),
+                        Row(children: [
+                          Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(color: const Color(0xFF00E676).withOpacity(.16), borderRadius: BorderRadius.circular(8)), child: const Text('COMPLETED', style: TextStyle(color: Color(0xFF00E676), fontSize: 10, fontWeight: FontWeight.bold))),
+                          const SizedBox(width: 8),
+                          Text('$count/${_num(m['slots'])} Players', style: const TextStyle(fontSize: 11)),
+                        ]),
+                        const SizedBox(height: 8),
+                        Wrap(spacing: 8, children: [
+                          OutlinedButton(onPressed: () => _showPlayers(m), child: const Text('Players')),
+                          OutlinedButton(onPressed: () => _showMatchHisaab(m), child: const Text('Hisaab')),
+                        ]),
+                      ]),
+                    ),
+                  );
+                },
+              ),
+      ),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
+  }
+
+  Widget _quickAction(IconData icon, String label, int? count, VoidCallback onTap, {Color iconColor = const Color(0xFFFF9800), Color badgeColor = const Color(0xFFFF9800)}) => Card(margin: EdgeInsets.zero, child: InkWell(
     onTap: onTap, borderRadius: BorderRadius.circular(12), child: Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 3), child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, size: 19, color: const Color(0xFFFF9800)), if (count != null) ...[const SizedBox(width: 5), Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFFF9800), borderRadius: BorderRadius.circular(10)), child: Text('$count', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)))] ]),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, size: 19, color: iconColor), if (count != null) ...[const SizedBox(width: 5), Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: badgeColor, borderRadius: BorderRadius.circular(10)), child: Text('$count', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)))] ]),
       const SizedBox(height: 4), Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
     ])),
   ));
@@ -1116,41 +1197,41 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showRoomAfterAd(Map m) {
+    if (!_roomAvailable(m)) {
+      final start = _num(m['startAt']);
+      final releaseAt = _roomReleaseTime(m);
+      final message = m['hold'] == true
+          ? 'Room ID & Password abhi HOLD par hain. Admin release karenge.'
+          : (start <= 0 || _clock.millisecondsSinceEpoch < releaseAt
+              ? 'Room ID & Password match start hone se 15 minutes pehle yahin show hoga.'
+              : 'Admin ne abhi Room ID & Password release nahi kiya hai.');
+      showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Room ID / Password'),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+      ));
+      return;
+    }
     _showTimedAd(title: 'Room Details', url: _roomAdUrl, seconds: 5, onContinue: () {
       if (!mounted) return;
       showDialog(context: context, builder: (ctx) => AlertDialog(
         title: const Text('Match Room Details'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Expanded(child: SelectableText('Room ID: ${m['rId']}')),
-                TextButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(ClipboardData(text: '${m['rId'] ?? ''}'));
-                    if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Room ID copied!')));
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Copy'),
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                Expanded(child: SelectableText('Password: ${m['rPass']}')),
-                TextButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(ClipboardData(text: '${m['rPass'] ?? ''}'));
-                    if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Password copied!')));
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Copy'),
-                ),
-              ],
-            ),
-          ],
-        ),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            Expanded(child: SelectableText('Room ID: ${m['rId']}')),
+            TextButton.icon(onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: '${m['rId'] ?? ''}'));
+              if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Room ID copied!')));
+            }, icon: const Icon(Icons.copy, size: 16), label: const Text('Copy')),
+          ]),
+          Row(children: [
+            Expanded(child: SelectableText('Password: ${m['rPass']}')),
+            TextButton.icon(onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: '${m['rPass'] ?? ''}'));
+              if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Password copied!')));
+            }, icon: const Icon(Icons.copy, size: 16), label: const Text('Copy')),
+          ]),
+        ]),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
       ));
     });
@@ -1680,7 +1761,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch}),
                   'startAt': st.millisecondsSinceEpoch,
                   'closeAt': st.millisecondsSinceEpoch,
-                  'roomReleaseAt': rm.millisecondsSinceEpoch,
+                  'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds,
                   'hold': false,
                   'status': 'OPEN',
                   'fee': _num(feeC.text),
@@ -1949,12 +2030,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   'Time: ${_smartMatchTime(m)} | Entry: ₹${m['fee']} | Kill: ₹${m['kill']} | Win: ₹${m['win']}',
                   style: const TextStyle(color: Colors.grey, fontSize: 12),
                 ),
-                Text('Join: ${closed ? 'CLOSED' : 'OPEN'} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : 'WAITING UNTIL ${_timeLabel(m['roomReleaseAt'])}')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
+                if (_isMatchCompleted(m)) ...[
+                  const SizedBox(height: 5),
+                  Row(children: [
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(color: const Color(0xFF00E676).withOpacity(.16), borderRadius: BorderRadius.circular(8)), child: const Text('COMPLETED', style: TextStyle(color: Color(0xFF00E676), fontSize: 10, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: 8),
+                    Text('${_matchPlayerCount(m)}/${_num(m['slots'])} Players', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                  ]),
+                ],
+                Text('Join: ${_isMatchCompleted(m) ? 'COMPLETED' : (closed ? 'CLOSED' : 'OPEN')} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : '15 min before match')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
                 if (joined || isAdmin) ...[
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     ElevatedButton(
-                      onPressed: (roomReady || isAdmin) ? () => _showRoomAfterAd(m) : null,
+                      onPressed: () => _showRoomAfterAd(m),
                       child: const Text('View Room ID / Pass'),
                     ),
                     if (isAdmin) ...[
@@ -1972,6 +2061,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           onPressed: () => _showPlayers(m),
                           style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
                           child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                        ),
+                        const SizedBox(width: 6),
+                        if (!_isMatchCompleted(m)) OutlinedButton(
+                          onPressed: () => _markMatchCompleted(m),
+                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), minimumSize: Size.zero, foregroundColor: const Color(0xFF00E676)),
+                          child: const Text('Complete', style: TextStyle(fontSize: 11)),
                         ),
                         const SizedBox(width: 6),
                         if (isSuperAdmin) OutlinedButton.icon(
