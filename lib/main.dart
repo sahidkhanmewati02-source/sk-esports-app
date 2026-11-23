@@ -1197,23 +1197,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showRoomAfterAd(Map m) {
-    if (!_roomAvailable(m)) {
-      final start = _num(m['startAt']);
-      final releaseAt = _roomReleaseTime(m);
-      final message = m['hold'] == true
-          ? 'Room ID & Password abhi HOLD par hain. Admin release karenge.'
-          : (start <= 0 || _clock.millisecondsSinceEpoch < releaseAt
-              ? 'Room ID & Password match start hone se 15 minutes pehle yahin show hoga.'
-              : 'Admin ne abhi Room ID & Password release nahi kiya hai.');
-      showDialog(context: context, builder: (ctx) => AlertDialog(
-        title: const Text('Room ID / Password'),
-        content: Text(message),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
-      ));
-      return;
-    }
+    // Restore the original 5-second Adsterra interstitial before showing
+    // either the room credentials or the not-yet-released information popup.
     _showTimedAd(title: 'Room Details', url: _roomAdUrl, seconds: 5, onContinue: () {
       if (!mounted) return;
+      if (!_roomAvailable(m)) {
+        final start = _num(m['startAt']);
+        final releaseAt = _roomReleaseTime(m);
+        final message = m['hold'] == true
+            ? 'Room ID & Password abhi HOLD par hain. Admin release karenge.'
+            : (start <= 0 || _clock.millisecondsSinceEpoch < releaseAt
+                ? 'Room ID & Password match start hone se 15 minutes pehle yahin show hoga.'
+                : 'Admin ne abhi Room ID & Password release nahi kiya hai.');
+        showDialog(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('Room ID / Password'),
+          content: Text(message),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        ));
+        return;
+      }
       showDialog(context: context, builder: (ctx) => AlertDialog(
         title: const Text('Match Room Details'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
