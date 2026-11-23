@@ -326,11 +326,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (players is Map) return players.length;
     if (players is List) return players.length;
     return 0;
-  }  int _matchPlayerCount(Map m) {
-    final players = m['players'];
-    if (players is Map) return players.length;
-    if (players is List) return players.length;
-    return 0;
   }
 
   int _rosterCollection(Map match, Map hisaab) {
