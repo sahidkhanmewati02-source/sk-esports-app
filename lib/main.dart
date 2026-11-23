@@ -800,15 +800,23 @@ class _HomeScreenState extends State<HomeScreen> {
     ));
   }
 
-  Widget _adminQuickActions() => Padding(padding: const EdgeInsets.only(bottom: 12), child: Row(children: [
-    Expanded(child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
-    const SizedBox(width: 6),
-    Expanded(child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
-    const SizedBox(width: 6),
-    Expanded(child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
-    const SizedBox(width: 6),
-    Expanded(child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
-  ]));
+  Widget _adminQuickActions() {
+    final width = (MediaQuery.of(context).size.width - 44) / 3;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          SizedBox(width: width, child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
+          SizedBox(width: width, child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
+          SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
+          if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog)),
+          SizedBox(width: width, child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
+        ],
+      ),
+    );
+  }
 
   Widget _quickAction(IconData icon, String label, int? count, VoidCallback onTap) => Card(margin: EdgeInsets.zero, child: InkWell(
     onTap: onTap, borderRadius: BorderRadius.circular(12), child: Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 3), child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1120,10 +1128,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   int get _activeCoAdminCount => _users.where((u) => u['email']?.toString().toLowerCase() != kAdmin.toLowerCase() && u['role'] == 'coadmin').length;
 
-  Widget _roleManagementCard() => SizedBox(
-    width: 150,
-    child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog),
-  );
 
   void _showCoAdminDialog() {
     if (!isSuperAdmin) return;
@@ -1643,36 +1647,41 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _paymentSettingsCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('PAYMENT METHOD / UPI DETAILS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-          const SizedBox(height: 8),
-          TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
-            onPressed: () async {
-              _upiId = _upiC.text.trim();
-              _qrUrl = _qrC.text.trim();
-              final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
-              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Payment details save nahi hue.');
-              _msg('New Payment QR Live!');
-              if (mounted) setState(() {});
-            },
-            child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ]),
+  void _showPaymentSettingsDialog() {
+    if (!isSuperAdmin) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('PAYMENT METHOD / UPI DETAILS', style: TextStyle(color: Color(0xFFFF9800), fontSize: 16)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
+            TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
+                onPressed: () async {
+                  _upiId = _upiC.text.trim();
+                  _qrUrl = _qrC.text.trim();
+                  final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
+                  if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Payment details save nahi hue.');
+                  _msg('New Payment QR Live!');
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) setState(() {});
+                },
+                child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ]),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
       ),
     );
   }
 
-
-  @override
   Widget build(BuildContext context) {
     final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
     final showQuickActions = isAdmin;
@@ -1801,21 +1810,34 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          Row(children: [
-            Expanded(
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
-        onPressed: _deposit,
-                child: const Text('Add Money', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+                  onPressed: _deposit,
+                  child: const Text('Add Money', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
-          ]),
-          if (isSuperAdmin) ...[
-            const SizedBox(height: 10),
-            _paymentSettingsCard(),
-          ],
+              const SizedBox(width: 8),
+              Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
+              if (isSuperAdmin) ...[
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 66,
+                  height: 42,
+                  child: OutlinedButton(
+                    onPressed: _showPaymentSettingsDialog,
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4), foregroundColor: const Color(0xFFFF9800), side: const BorderSide(color: Color(0xFFFF9800))),
+                    child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.qr_code_2, size: 17),
+                      Text('UPI / QR', style: TextStyle(fontSize: 9)),
+                    ]),
+                  ),
+                ),
+              ],
+            ],
+          ),
           const SizedBox(height: 10),
           Expanded(
             child: ListView.builder(
@@ -1877,7 +1899,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           if (isSuperAdmin) ...[
-          _roleManagementCard(),
           Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('ABOUT LINKS & RULES EDITOR', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)), const SizedBox(height: 6), const Text('Har line: Button Name | https://link', style: TextStyle(fontSize: 11, color: Colors.grey)), TextField(controller: _aboutLinksC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Social / Support Links', border: OutlineInputBorder())), const SizedBox(height: 8), TextField(controller: _rulesC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Rules (BGMI Level 30+ etc.)', border: OutlineInputBorder())), ElevatedButton(onPressed: _saveAboutRules, child: const Text('Save About & Rules'))]))),
           ],
           const SizedBox(height: 12),
