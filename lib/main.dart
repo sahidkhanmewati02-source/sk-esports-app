@@ -2010,24 +2010,25 @@ class _HomeScreenState extends State<HomeScreen> {
     final bonus = _num(_rewards['bonusWallet']);
     final watched = _num(_rewards['watchCount']);
     final streak = _num(_rewards['streakDay']);
-    final streakDone = _rewards['streakClaimed'] == true;
-    final dailyDone = _rewards['dailyBonusClaimed'] == true;
     final rewardUrlMissing = _resolveAdTarget(_rewardAdUrl) == null;
     final windowStart = _num(_rewards['windowStart']);
     final cooldownEnd = windowStart > 0 ? DateTime.fromMillisecondsSinceEpoch(windowStart).add(const Duration(hours: 24)) : DateTime.fromMillisecondsSinceEpoch(0);
     final cooldown = cooldownEnd.difference(_clock);
     final cooldownActive = cooldown.inSeconds > 0;
+    final streakDone = cooldownActive && _rewards['streakClaimed'] == true;
+    final dailyDone = cooldownActive && _rewards['dailyBonusClaimed'] == true;
+    final displayWatched = cooldownActive ? watched : 0;
     final cooldownLabel = cooldownActive
         ? '${cooldown.inHours.toString().padLeft(2, '0')}:${(cooldown.inMinutes % 60).toString().padLeft(2, '0')}:${(cooldown.inSeconds % 60).toString().padLeft(2, '0')}'
         : '';
     // Watch & Earn is allowed up to 20 claims per rolling 24-hour window;
     // streak and daily bonus each have their own once-per-window claim flag.
-    final watchBlocked = rewardUrlMissing || watched >= 20;
+    final watchBlocked = rewardUrlMissing || (cooldownActive && watched >= 20);
     final streakBlocked = rewardUrlMissing || streakDone;
     final dailyBlocked = rewardUrlMissing || dailyDone;
     String rewardReason(String kind) {
       if (rewardUrlMissing) return 'Reward Ads link missing/invalid — Admin settings mein valid Adsterra URL set karein.';
-      if (kind == 'watch' && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset in $cooldownLabel.';
+      if (kind == 'watch' && cooldownActive && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset in $cooldownLabel.';
       if (kind == 'streak' && streakDone) return 'Daily Streak claimed. Reset in $cooldownLabel.';
       if (kind == 'daily' && dailyDone) return 'Daily Bonus claimed. Reset in $cooldownLabel.';
       return '';
@@ -2047,7 +2048,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Wrap(spacing: 6, runSpacing: 6, children: [
             OutlinedButton(
               onPressed: watchBlocked ? null : () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
-              child: Text('Watch & Earn ($watched/20)'),
+              child: Text('Watch & Earn ($displayWatched/20)'),
             ),
             OutlinedButton(
               onPressed: streakBlocked ? null : () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
