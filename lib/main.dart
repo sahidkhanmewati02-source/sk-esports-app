@@ -676,6 +676,44 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
         _matches = list;
+        // One-time Super Admin migration: persist stable sequential slots for older roster entries.
+        if (isSuperAdmin) {
+          final slotMigration = <String, dynamic>{};
+          for (final match in list) {
+            final players = match['players'];
+            if (players is Map) {
+              var slot = 0;
+              for (final entry in players.entries) {
+                slot++;
+                if (entry.value is Map && _num((entry.value as Map)['slotNumber']) <= 0) {
+                  slotMigration['matches/${match['id']}/players/${entry.key}/slotNumber'] = slot;
+                }
+              }
+            }
+          }
+          if (slotMigration.isNotEmpty) {
+            final migrationRes = await http.patch(
+              Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
+              body: jsonEncode(slotMigration),
+            );
+            if (migrationRes.statusCode < 200 || migrationRes.statusCode >= 300) {
+              _msg('Purane players ke slot numbers auto-save nahi ho paye: ${migrationRes.body}');
+            } else {
+              for (final match in list) {
+                final players = match['players'];
+                if (players is Map) {
+                  var slot = 0;
+                  for (final entry in players.entries) {
+                    slot++;
+                    if (entry.value is Map && _num((entry.value as Map)['slotNumber']) <= 0) {
+                      (entry.value as Map)['slotNumber'] = slot;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
         _sortMatches();
       } else {
         final def = {'m1': {
