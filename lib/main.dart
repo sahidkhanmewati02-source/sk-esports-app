@@ -1694,7 +1694,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   for (var i = 0; i < teamSize; i++) {
                     final ign = nameControllers[i].text.trim();
                     final bgmiId = idControllers[i].text.trim();
-                    if (ign.isEmpty || bgmiId.length < 10 || bgmiId.length > 11 || !RegExp(r'^\d+).hasMatch(bgmiId)) {).hasMatch(bgmiId)) {
+                    if (ign.isEmpty || bgmiId.length < 10 || bgmiId.length > 11 || !RegExp(r'^\d{10,11}$').hasMatch(bgmiId)) {
                       return _msg('Teammate ${i + 1} ka sahi BGMI Name aur 10–11 digit ID dalein.');
                     }
                     members.add({'ign': ign, 'bgmiId': bgmiId});
@@ -2313,7 +2313,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       title: Text('${i + 1}. ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       subtitle: Text(
                         p['members'] is List
-                          ? (p['members'] as List).asMap().entries.map((e) => '${e.key + 1}. ${(e.value as Map)['ign'] ?? '-'} • ID: ${(e.value as Map)['bgmiId'] ?? '-'}').join('\\n')
+                          ? (p['members'] as List).asMap().entries.map((e) => '${e.key + 1}. ${(e.value as Map)['ign'] ?? '-'} • ID: ${(e.value as Map)['bgmiId'] ?? '-'}').join('\n')
                           : 'ID: ${p['bgmiId'] ?? '-'}',
                         style: const TextStyle(fontSize: 12),
                       ),
