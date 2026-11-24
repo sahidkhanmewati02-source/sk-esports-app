@@ -1687,15 +1687,15 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
             OutlinedButton(
-              onPressed: watched >= 20 ? null : () => _showTimedAd(title: 'Watch & Earn', url: _joinAdUrl, seconds: 5, onContinue: () => _claimReward('watch')),
+              onPressed: () => _showTimedAd(title: 'Watch & Earn', url: _joinAdUrl, seconds: 5, onContinue: () => _claimReward('watch')),
               child: Text('Watch & Earn ($watched/20)'),
             ),
             OutlinedButton(
-              onPressed: streakDone ? null : () => _claimReward('streak'),
+              onPressed: () => _claimReward('streak'),
               child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
             ),
             OutlinedButton(
-              onPressed: dailyDone ? null : () => _claimReward('daily'),
+              onPressed: () => _claimReward('daily'),
               child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
             ),
             ElevatedButton(
