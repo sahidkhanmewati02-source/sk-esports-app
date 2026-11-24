@@ -15,6 +15,7 @@ jobs:
       - run: flutter create . --platforms=android
       - run: python3 -c 'p="android/app/src/main/AndroidManifest.xml"; s=open(p).read(); open(p,"w").write(s.replace("\x3capplication", "\x3cuses-permission android:name=\"android.permission.INTERNET\"/\x3e\n    \x3capplication"))'
       - run: flutter pub get
+      - run: flutter --version
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
