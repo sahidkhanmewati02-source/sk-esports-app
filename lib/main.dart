@@ -23,9 +23,45 @@ void main() => runApp(MaterialApp(
       home: const AuthScreen(),
     ));
 
+Uri? _resolveAdTarget(String raw) {
+  final value = raw.trim();
+  if (value.startsWith('intent://')) {
+    final fallback = RegExp(r'S\\.browser_fallback_url=([^;]+)').firstMatch(value);
+    if (fallback != null) {
+      final decoded = Uri.decodeComponent(fallback.group(1)!);
+      final parsed = Uri.tryParse(decoded);
+      if (parsed != null && (parsed.scheme == 'https' || parsed.scheme == 'http')) return parsed;
+    }
+    final hostPath = value.substring('intent://'.length).split('#Intent;').first;
+    return Uri.tryParse('https://$hostPath');
+  }
+  if (value.startsWith('market://')) {
+    final market = Uri.tryParse(value);
+    final packageId = market?.queryParameters['id'];
+    if (packageId != null && packageId.isNotEmpty) {
+      return Uri.parse('https://play.google.com/store/apps/details?id=${Uri.encodeComponent(packageId)}');
+    }
+    return null;
+  }
+  final uri = Uri.tryParse(value);
+  if (uri != null && (uri.scheme == 'https' || uri.scheme == 'http')) return uri;
+  return null;
+}
+
+Future<void> _openAdTargetOnce(String raw) async {
+  final uri = _resolveAdTarget(raw);
+  if (uri == null) return;
+  try {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened) await launchUrl(uri, mode: LaunchMode.platformDefault);
+  } catch (_) {
+    try { await launchUrl(uri, mode: LaunchMode.platformDefault); } catch (_) {}
+  }
+}
+
 class AdViewerDialog extends StatefulWidget {
   final String title, url;
-  final int seconds;
+  final int? seconds;
   final VoidCallback onContinue;
   const AdViewerDialog({super.key, required this.title, required this.url, required this.seconds, required this.onContinue});
   @override
@@ -35,24 +71,60 @@ class AdViewerDialog extends StatefulWidget {
 class _AdViewerDialogState extends State<AdViewerDialog> {
   late final WebViewController _controller;
   Timer? _timer;
-  late int _remaining;
+  int _remaining = 0;
+  bool _finished = false;
+  String? _lastHttpUrl;
+  String? _pendingExternalUrl;
 
   @override
   void initState() {
     super.initState();
-    _remaining = widget.seconds;
+    _remaining = widget.seconds ?? 0;
+    _lastHttpUrl = widget.url;
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel('AdExternal', onMessageReceived: (message) {
+        final target = _resolveAdTarget(message.message);
+        if (target != null) _pendingExternalUrl = target.toString();
+      })
+      ..setNavigationDelegate(NavigationDelegate(
+        onNavigationRequest: (request) {
+          final raw = request.url;
+          final uri = Uri.tryParse(raw);
+          if (uri != null && (uri.scheme == 'https' || uri.scheme == 'http')) {
+            if (request.isMainFrame) _lastHttpUrl = raw;
+            return NavigationDecision.navigate;
+          }
+          if (raw.startsWith('intent://') || raw.startsWith('market://')) {
+            final target = _resolveAdTarget(raw);
+            if (target != null) _pendingExternalUrl = target.toString();
+            return NavigationDecision.prevent;
+          }
+          return NavigationDecision.prevent;
+        },
+      ))
       ..loadRequest(Uri.parse(widget.url));
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) { timer.cancel(); return; }
-      if (_remaining <= 1) {
-        timer.cancel();
-        setState(() => _remaining = 0);
-      } else {
-        setState(() => _remaining--);
-      }
-    });
+    if (widget.seconds != null && widget.seconds! > 0) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted || _finished) { timer.cancel(); return; }
+        if (_remaining <= 1) {
+          timer.cancel();
+          setState(() => _remaining = 0);
+        } else {
+          setState(() => _remaining--);
+        }
+      });
+    }
+  }
+
+  Future<void> _finishAd() async {
+    if (_finished) return;
+    _finished = true;
+    _timer?.cancel();
+    final destination = _pendingExternalUrl ?? _lastHttpUrl ?? widget.url;
+    if (mounted) Navigator.of(context).pop();
+    await _openAdTargetOnce(destination);
+    widget.onContinue();
   }
 
   @override
@@ -62,8 +134,13 @@ class _AdViewerDialogState extends State<AdViewerDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: _remaining == 0,
+  Widget build(BuildContext context) => WillPopScope(
+    onWillPop: () async {
+      if (widget.seconds == null || _remaining == 0) {
+        await _finishAd();
+      }
+      return false;
+    },
     child: Dialog(
       insetPadding: EdgeInsets.zero,
       backgroundColor: const Color(0xFF0D1117),
@@ -75,13 +152,13 @@ class _AdViewerDialogState extends State<AdViewerDialog> {
             child: SafeArea(
               bottom: false,
               child: Row(children: [
-                Expanded(child: Text(_remaining > 0 ? 'Ad: Please wait ${_remaining}s...' : 'Ad: Ready to continue', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                Expanded(child: Text(
+                  widget.seconds == null ? 'Sponsored Ad' : (_remaining > 0 ? 'Ad: Please wait ${_remaining}s...' : 'Ad: Ready to continue'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                )),
                 ElevatedButton(
-                  onPressed: _remaining == 0 ? () {
-                    Navigator.of(context).pop();
-                    widget.onContinue();
-                  } : null,
-                  child: const Text('Continue'),
+                  onPressed: (widget.seconds == null || _remaining == 0) ? _finishAd : null,
+                  child: Text(widget.seconds == null ? 'Close / Skip' : 'Continue'),
                 ),
               ]),
             ),
@@ -102,7 +179,8 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _name = TextEditingController(),
       _email = TextEditingController(),
-      _pass = TextEditingController();
+      _pass = TextEditingController(),
+      _referral = TextEditingController();
   bool _isLogin = true, _showPass = false, _loading = false, _checking = true;
 
   @override
@@ -176,6 +254,17 @@ class _AuthScreenState extends State<AuthScreen> {
         throw Exception(data['error']?['message'] ?? 'Auth Failed');
       }
       final String uid = data['localId'], token = data['idToken'];
+      String? referredBy;
+      if (!_isLogin && _referral.text.trim().isNotEmpty) {
+        final code = _referral.text.trim();
+        if (code == uid) throw Exception('Apna referral code khud use nahi kar sakte.');
+        final refRes = await http.get(Uri.parse('$kDbUrl/users/$code.json?auth=$token'));
+        if (refRes.statusCode == 200 && refRes.body != 'null') {
+          referredBy = code;
+        } else {
+          _msg('Referral code valid nahi mila. Account bina referral ke banaya ja raha hai.');
+        }
+      }
       final sp = await SharedPreferences.getInstance();
       await sp.setString('rt', data['refreshToken']);
       await sp.setString('email', e);
@@ -188,6 +277,10 @@ class _AuthScreenState extends State<AuthScreen> {
             'ign': _name.text.trim(),
             'bgmiId': 'Not Set',
             'wallet': 0,
+            'referralCode': uid,
+            'referralCount': 0,
+            'referralEarnings': 0,
+            if (referredBy != null) 'referredBy': referredBy,
           }),
         );
       }
@@ -223,6 +316,8 @@ class _AuthScreenState extends State<AuthScreen> {
                 const SizedBox(height: 14),
                 if (!_isLogin) ...[
                   TextField(controller: _name, decoration: const InputDecoration(labelText: 'Your Name', border: OutlineInputBorder())),
+                  const SizedBox(height: 10),
+                  TextField(controller: _referral, decoration: const InputDecoration(labelText: 'Referral Code (Optional)', border: OutlineInputBorder(), helperText: 'Friend ka SK ESPORTS referral code dalein')),
                   const SizedBox(height: 10),
                 ],
                 TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
@@ -344,8 +439,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool get isAdmin => isSuperAdmin || _isCoAdmin;
   int _tab = 0, _wallet = 0;
   Map<String, dynamic> _rewards = {};
+  int _referralCount = 0, _referralEarnings = 0;
+  String _referralCode = '', _referredBy = '';
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
-  String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
+  String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com', _rewardAdUrl = 'https://example.com';
   String _promoImageUrl = '', _promoClickUrl = '';
   String _adsterraBannerCode = '';
   bool _promoEnabled = false, _autoBannerAdEnabled = true;
@@ -359,6 +456,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _upiC = TextEditingController(), _qrC = TextEditingController();
   final _joinAdUrlController = TextEditingController(text: 'https://example.com');
   final _roomAdUrlController = TextEditingController(text: 'https://example.com');
+  final _rewardAdUrlController = TextEditingController(text: 'https://example.com');
   final _promoImageUrlController = TextEditingController();
   final _promoClickUrlController = TextEditingController();
   final _adsterraBannerCodeController = TextEditingController();
@@ -373,7 +471,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _matchTicker?.cancel();
-    _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose(); _adsterraBannerCodeController.dispose();
+    _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _rewardAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose(); _adsterraBannerCodeController.dispose();
     _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose();
     super.dispose();
   }
@@ -459,6 +557,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _qrUrl = c['qrUrl'] ?? '';
         _joinAdUrl = c['joinAdUrl'] ?? 'https://example.com';
         _roomAdUrl = c['roomAdUrl'] ?? 'https://example.com';
+        _rewardAdUrl = c['rewardAdUrl'] ?? 'https://example.com';
         _promoImageUrl = c['promoImageUrl'] ?? '';
         _promoClickUrl = c['promoClickUrl'] ?? '';
         _promoEnabled = c['promoEnabled'] == true;
@@ -468,6 +567,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _superAdminUid = '${c['superAdminUid'] ?? ''}';
         _joinAdUrlController.text = _joinAdUrl;
         _roomAdUrlController.text = _roomAdUrl;
+        _rewardAdUrlController.text = _rewardAdUrl;
         _promoImageUrlController.text = _promoImageUrl;
         _promoClickUrlController.text = _promoClickUrl;
       }
@@ -485,7 +585,23 @@ class _HomeScreenState extends State<HomeScreen> {
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
         _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
-        if (_rewards.isEmpty) await _ensureRewards();
+        _referralCode = (d['referralCode'] ?? widget.uid).toString();
+        _referralCount = _num(d['referralCount']);
+        _referralEarnings = _num(d['referralEarnings']);
+        _referredBy = (d['referredBy'] ?? '').toString();
+        if (_rewards.isEmpty) {
+          await _ensureRewards();
+        } else if (!_rewards.containsKey('discountsUsed') || !_rewards.containsKey('discountMatchId') || !_rewards.containsKey('discountAmount')) {
+          final migrated = Map<String, dynamic>.from(_rewards);
+          migrated['discountsUsed'] = migrated['discountsUsed'] is Map ? migrated['discountsUsed'] : <String, dynamic>{};
+          migrated['discountMatchId'] = migrated['discountMatchId'] ?? '';
+          migrated['discountAmount'] = migrated['discountAmount'] ?? 0;
+          migrated['updatedAt'] = {'.sv': 'timestamp'};
+          await _putRewards(migrated);
+        }
+        if (d['referralCode'] == null) {
+          await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(widget.uid));
+        }
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
           _txns = (d['txns'] as Map).values.toList().reversed.toList();
@@ -1203,7 +1319,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
-  Future<void> _showTimedAd({required String title, required String url, required int seconds, required VoidCallback onContinue}) async {
+  Future<void> _showTimedAd({required String title, required String url, required int? seconds, required VoidCallback onContinue}) async {
     final trimmedUrl = url.trim();
     final uri = Uri.tryParse(trimmedUrl);
     if (trimmedUrl.isEmpty || uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
@@ -1222,8 +1338,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showRoomAfterAd(Map m) {
-    // Restore the original 5-second Adsterra interstitial before showing
-    // either the room credentials or the not-yet-released information popup.
+    // Preserve the existing 5-second room-details ad flow.
     _showTimedAd(title: 'Room Details', url: _roomAdUrl, seconds: 5, onContinue: () {
       if (!mounted) return;
       if (!_roomAvailable(m)) {
@@ -1260,11 +1375,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void _saveAdAndPromoConfig() async {
     _joinAdUrl = _joinAdUrlController.text.trim();
     _roomAdUrl = _roomAdUrlController.text.trim();
+    _rewardAdUrl = _rewardAdUrlController.text.trim();
     _promoImageUrl = _promoImageUrlController.text.trim();
     _promoClickUrl = _promoClickUrlController.text.trim();
     final data = {
       'joinAdUrl': _joinAdUrl,
       'roomAdUrl': _roomAdUrl,
+      'rewardAdUrl': _rewardAdUrlController.text.trim(),
       'promoImageUrl': _promoImageUrl,
       'promoClickUrl': _promoClickUrl,
       'promoEnabled': _promoEnabled,
@@ -1579,6 +1696,9 @@ class _HomeScreenState extends State<HomeScreen> {
       'streakDay': 0,
       'streakClaimed': false,
       'dailyBonusClaimed': false,
+      'discountMatchId': '',
+      'discountAmount': 0,
+      'discountsUsed': <String, dynamic>{},
       'updatedAt': {'.sv': 'timestamp'},
     };
     final res = await http.put(
@@ -1666,6 +1786,30 @@ class _HomeScreenState extends State<HomeScreen> {
     _msg('$rupees rupees Bonus Wallet mein add hue. Main Wallet unchanged hai.');
   }
 
+  Widget _referralCard() {
+    final code = _referralCode.isEmpty ? widget.uid : _referralCode;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('REFER & EARN', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+          const SizedBox(height: 5),
+          const Text('Friend ke first ₹20+ approved deposit par aapko ₹5 Main Wallet mein milenge.', style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: SelectableText('Your Code: $code', style: const TextStyle(fontWeight: FontWeight.bold))),
+            IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
+          ]),
+          Row(children: [
+            Expanded(child: Text('Successful referrals: $_referralCount', style: const TextStyle(color: Colors.white70, fontSize: 12))),
+            Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+          ]),
+          if (_referredBy.isNotEmpty) const Text('Referral linked to your account.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+        ]),
+      ),
+    );
+  }
+
   Widget _rewardsCard() {
     final coins = _num(_rewards['coins']);
     final bonus = _num(_rewards['bonusWallet']);
@@ -1687,15 +1831,15 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
             OutlinedButton(
-              onPressed: () => _showTimedAd(title: 'Watch & Earn', url: _joinAdUrl, seconds: 5, onContinue: () => _claimReward('watch')),
+              onPressed: () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
               child: Text('Watch & Earn ($watched/20)'),
             ),
             OutlinedButton(
-              onPressed: () => _claimReward('streak'),
+              onPressed: () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
               child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
             ),
             OutlinedButton(
-              onPressed: () => _claimReward('daily'),
+              onPressed: () => _showTimedAd(title: 'Daily Bonus', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('daily')),
               child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
             ),
             ElevatedButton(
@@ -2275,6 +2419,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           _rewardsCard(),
+          _referralCard(),
           Row(
             children: [
               Expanded(
@@ -2345,6 +2490,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 TextField(controller: _joinAdUrlController, decoration: const InputDecoration(labelText: 'Join Ad Direct Link (10 sec)')),
                 const SizedBox(height: 8),
                 TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Room Ad Direct Link (5 sec)')),
+                const SizedBox(height: 8),
+                TextField(controller: _rewardAdUrlController, decoration: const InputDecoration(labelText: 'Reward Ads Direct Link (full-screen; no app timer)')),
                 const SizedBox(height: 8),
                 TextField(controller: _promoImageUrlController, decoration: const InputDecoration(labelText: 'Promo Image URL')),
                 const SizedBox(height: 8),
