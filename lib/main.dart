@@ -2946,7 +2946,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 8),
                 TextField(controller: _joinAdUrlController, decoration: const InputDecoration(labelText: 'Join Ad Direct Link (10 sec)')),
                 const SizedBox(height: 8),
-                TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Room Ad Direct Link (5 sec)')),
+                TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Legacy Room Ad URL (unused)')),
                 const SizedBox(height: 8),
                 TextField(controller: _unityGameIdController, decoration: const InputDecoration(labelText: 'Unity Ads Game ID (Android)')),
                 const SizedBox(height: 8),
