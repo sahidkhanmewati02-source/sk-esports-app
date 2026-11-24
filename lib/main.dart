@@ -321,23 +321,6 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  void _openRewardsPage() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(14),
-        children: [
-          _rewardsCard(),
-          const SizedBox(height: 10),
-          _referralCard(),
-        ],
-      ),
-    )));
-  }
-
   Widget build(BuildContext context) {
     if (_checking) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFFFF9800))));
@@ -2543,6 +2526,23 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
       ),
     );
+  }
+
+  void _openRewardsPage() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(14),
+        children: [
+          _rewardsCard(),
+          const SizedBox(height: 10),
+          _referralCard(),
+        ],
+      ),
+    )));
   }
 
   Widget build(BuildContext context) {
