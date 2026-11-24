@@ -2012,7 +2012,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final streak = _num(_rewards['streakDay']);
     final streakDone = _rewards['streakClaimed'] == true;
     final dailyDone = _rewards['dailyBonusClaimed'] == true;
-    final rewardUrlMissing = _rewardAdUrl.trim().isEmpty;
+    final rewardUrlMissing = _resolveAdTarget(_rewardAdUrl) == null;
     final windowStart = _num(_rewards['windowStart']);
     final cooldownEnd = windowStart > 0 ? DateTime.fromMillisecondsSinceEpoch(windowStart).add(const Duration(hours: 24)) : DateTime.fromMillisecondsSinceEpoch(0);
     final cooldown = cooldownEnd.difference(_clock);
@@ -2020,15 +2020,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final cooldownLabel = cooldownActive
         ? '${cooldown.inHours.toString().padLeft(2, '0')}:${(cooldown.inMinutes % 60).toString().padLeft(2, '0')}:${(cooldown.inSeconds % 60).toString().padLeft(2, '0')}'
         : '';
-    final watchBlocked = rewardUrlMissing || cooldownActive || watched >= 20;
-    final streakBlocked = rewardUrlMissing || cooldownActive || streakDone;
-    final dailyBlocked = rewardUrlMissing || cooldownActive || dailyDone;
+    // Watch & Earn is allowed up to 20 claims per rolling 24-hour window;
+    // streak and daily bonus each have their own once-per-window claim flag.
+    final watchBlocked = rewardUrlMissing || watched >= 20;
+    final streakBlocked = rewardUrlMissing || streakDone;
+    final dailyBlocked = rewardUrlMissing || dailyDone;
     String rewardReason(String kind) {
-      if (rewardUrlMissing) return 'Reward Ads link missing — Admin settings mein real link set karein.';
-      if (cooldownActive) return 'Daily cooldown: $cooldownLabel remaining.';
-      if (kind == 'watch' && watched >= 20) return 'Aaj ke 20/20 Watch & Earn claims complete.';
-      if (kind == 'streak' && streakDone) return 'Daily Streak aaj claim ho chuka hai.';
-      if (kind == 'daily' && dailyDone) return 'Daily Bonus aaj claim ho chuka hai.';
+      if (rewardUrlMissing) return 'Reward Ads link missing/invalid — Admin settings mein valid Adsterra URL set karein.';
+      if (kind == 'watch' && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset in $cooldownLabel.';
+      if (kind == 'streak' && streakDone) return 'Daily Streak claimed. Reset in $cooldownLabel.';
+      if (kind == 'daily' && dailyDone) return 'Daily Bonus claimed. Reset in $cooldownLabel.';
       return '';
     }
     return Card(
