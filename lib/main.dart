@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -342,6 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isCoAdmin = false;
   bool get isAdmin => isSuperAdmin || _isCoAdmin;
   int _tab = 0, _wallet = 0;
+  Map<String, dynamic> _rewards = {};
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
   String _promoImageUrl = '', _promoClickUrl = '';
@@ -482,6 +484,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _ign = d['ign'] ?? 'SK_Player';
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
+        _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
+        if (_rewards.isEmpty) await _ensureRewards();
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
           _txns = (d['txns'] as Map).values.toList().reversed.toList();
@@ -1565,6 +1569,147 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+
+  Future<void> _ensureRewards() async {
+    final initial = <String, dynamic>{
+      'coins': 0,
+      'bonusWallet': 0,
+      'windowStart': {'.sv': 'timestamp'},
+      'watchCount': 0,
+      'streakDay': 0,
+      'streakClaimed': false,
+      'dailyBonusClaimed': false,
+      'updatedAt': {'.sv': 'timestamp'},
+    };
+    final res = await http.put(
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+      body: jsonEncode(initial),
+    );
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      try {
+        final saved = jsonDecode(res.body);
+        if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
+      } catch (_) { _rewards = initial; }
+    }
+  }
+
+  Future<bool> _putRewards(Map<String, dynamic> value) async {
+    final res = await http.put(
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+      body: jsonEncode(value),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) return false;
+    try {
+      final saved = jsonDecode(res.body);
+      if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
+      else _rewards = value;
+    } catch (_) { _rewards = value; }
+    if (mounted) setState(() {});
+    return true;
+  }
+
+  Future<void> _claimReward(String kind) async {
+    if (_rewards.isEmpty) await _ensureRewards();
+    var current = Map<String, dynamic>.from(_rewards);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final windowStart = _num(current['windowStart']);
+    if (windowStart > 0 && now - windowStart >= 86400000) {
+      current['windowStart'] = {'.sv': 'timestamp'};
+      current['watchCount'] = 0;
+      current['streakClaimed'] = false;
+      current['dailyBonusClaimed'] = false;
+      current['updatedAt'] = {'.sv': 'timestamp'};
+      if (!await _putRewards(current)) {
+        return _msg('Daily limit reset nahi hua. Refresh karke dobara try karein.');
+      }
+      current = Map<String, dynamic>.from(_rewards);
+    }
+    final next = Map<String, dynamic>.from(current);
+    var reward = 0;
+    if (kind == 'watch') {
+      if (_num(current['watchCount']) >= 20) return _msg('Aaj ke 20 Watch & Earn claims complete ho gaye.');
+      next['watchCount'] = _num(current['watchCount']) + 1;
+      reward = 10;
+    } else if (kind == 'streak') {
+      if (current['streakClaimed'] == true) return _msg('Daily Streak aaj claim ho chuka hai.');
+      final day = (_num(current['streakDay']) % 7) + 1;
+      const payouts = [10, 15, 20, 25, 30, 35, 40];
+      reward = payouts[day - 1];
+      next['streakDay'] = day;
+      next['streakClaimed'] = true;
+    } else if (kind == 'daily') {
+      if (current['dailyBonusClaimed'] == true) return _msg('Daily Bonus aaj claim ho chuka hai.');
+      reward = math.Random.secure().nextInt(20) + 1;
+      next['dailyBonusClaimed'] = true;
+    } else {
+      return;
+    }
+    next['coins'] = _num(current['coins']) + reward;
+    next['updatedAt'] = {'.sv': 'timestamp'};
+    if (!await _putRewards(next)) {
+      return _msg('Reward claim Rules ne reject kiya. Refresh karke dobara try karein.');
+    }
+    _msg('Mubarak! $reward coins Bonus Wallet rewards mein add hue.');
+  }
+
+  Future<void> _exchangeCoins() async {
+    final coins = _num(_rewards['coins']);
+    final rupees = coins ~/ 100;
+    if (rupees < 1) return _msg('Exchange ke liye kam se kam 100 coins chahiye.');
+    final next = Map<String, dynamic>.from(_rewards);
+    next['coins'] = coins - (rupees * 100);
+    next['bonusWallet'] = _num(_rewards['bonusWallet']) + rupees;
+    next['updatedAt'] = {'.sv': 'timestamp'};
+    if (!await _putRewards(next)) {
+      return _msg('Coin Exchange Rules ne reject kiya. Refresh karke try karein.');
+    }
+    _msg('$rupees rupees Bonus Wallet mein add hue. Main Wallet unchanged hai.');
+  }
+
+  Widget _rewardsCard() {
+    final coins = _num(_rewards['coins']);
+    final bonus = _num(_rewards['bonusWallet']);
+    final watched = _num(_rewards['watchCount']);
+    final streak = _num(_rewards['streakDay']);
+    final streakDone = _rewards['streakClaimed'] == true;
+    final dailyDone = _rewards['dailyBonusClaimed'] == true;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(child: Text('BONUS REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
+            Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold)),
+          ]),
+          const SizedBox(height: 4),
+          Text('Bonus Wallet: ₹$bonus  •  Non-withdrawable', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
+          const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            OutlinedButton(
+              onPressed: watched >= 20 ? null : () => _showTimedAd(title: 'Watch & Earn', url: _joinAdUrl, seconds: 5, onContinue: () => _claimReward('watch')),
+              child: Text('Watch & Earn ($watched/20)'),
+            ),
+            OutlinedButton(
+              onPressed: streakDone ? null : () => _claimReward('streak'),
+              child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
+            ),
+            OutlinedButton(
+              onPressed: dailyDone ? null : () => _claimReward('daily'),
+              child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
+            ),
+            ElevatedButton(
+              onPressed: coins >= 100 ? _exchangeCoins : null,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+              child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
+            ),
+          ]),
+          const Text('Limits: 20 ad claims/day × 10 coins; Streak 10–40 coins; Daily Bonus 1–20 coins. Ad-view authenticity Firebase Spark client-only par verify nahi hoti.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+        ]),
+      ),
+    );
+  }
+
   void _deposit() {
         final amtC = TextEditingController(text: '50');
 
@@ -2129,6 +2274,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
+          _rewardsCard(),
           Row(
             children: [
               Expanded(
