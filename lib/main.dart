@@ -1669,9 +1669,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final usedDiscounts = _rewards['discountsUsed'] is Map ? _rewards['discountsUsed'] as Map : <dynamic, dynamic>{};
     final hasDiscountReservation = usedDiscounts[matchId] == true && _rewards['discountMatchId']?.toString() == matchId && _num(_rewards['discountAmount']) > 0;
     final previouslyDiscounted = usedDiscounts[matchId] == true && !hasDiscountReservation;
+    final lastDiscountMatchId = (_rewards['discountMatchId'] ?? '').toString();
+    final lastDiscountConsumed = lastDiscountMatchId.isNotEmpty && _matches.any((x) => x['id']?.toString() == lastDiscountMatchId && x['players'] is Map && (x['players'] as Map).containsKey(widget.uid));
+    final hasOtherReservation = lastDiscountMatchId.isNotEmpty && lastDiscountMatchId != matchId && _num(_rewards['discountAmount']) > 0 && !lastDiscountConsumed;
     final nameControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 ? _ign : ''));
     final idControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 && _bgmiId != 'Not Set' ? _bgmiId : ''));
-    var useBonus = hasDiscountReservation || (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted);
+    var useBonus = hasDiscountReservation || (!hasOtherReservation && _num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -1699,7 +1702,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     TextField(controller: idControllers[i], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: InputDecoration(labelText: 'BGMI ID • ${i + 1}', border: const OutlineInputBorder())),
                     const SizedBox(height: 10),
                   ],
-                  if (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted && !hasDiscountReservation) SwitchListTile(
+                  if (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted && !hasDiscountReservation && !hasOtherReservation) SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: useBonus,
                     onChanged: (v) => setDialogState(() => useBonus = v),
@@ -1707,6 +1710,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: Text('Max 10%: up to ₹$maxDiscount • Available ₹${_num(_rewards['bonusWallet'])}', style: const TextStyle(fontSize: 11)),
                   ),
                   if (hasDiscountReservation) Text('Reserved Bonus discount ₹$discount is ready for this match.', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676))),
+                  if (hasOtherReservation) const Text('Pehle reserved match join complete karein; phir next match discount use hoga.', style: TextStyle(fontSize: 11, color: Colors.amber)),
                   if (previouslyDiscounted) const Text('Is match mein aapka Bonus discount pehle use ho chuka hai.', style: TextStyle(fontSize: 11, color: Colors.amber)),
                   Container(
                     width: double.infinity,
