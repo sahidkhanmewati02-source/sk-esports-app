@@ -1462,6 +1462,17 @@ class _HomeScreenState extends State<HomeScreen> {
             ...Map<String, dynamic>.from(v),
             'id': txnKey.toString(),
             'ign': u['ign'] ?? 'Player',
+            '_historyKind': 'wallet',
+          });
+        });
+      }
+      if (u['rewardHistory'] is Map) {
+        (u['rewardHistory'] as Map).forEach((historyId, value) {
+          if (value is Map) list.add({
+            ...Map<String, dynamic>.from(value),
+            'id': historyId.toString(),
+            'ign': u['ign'] ?? 'Player',
+            '_historyKind': 'reward',
           });
         });
       }
@@ -1487,7 +1498,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         '${t['sub'] ?? ''} • ${t['status'] ?? ''}\n${_formatHistoryDateTime(t)}',
                         style: const TextStyle(fontSize: 11),
                       ),
-                      trailing: Text('₹${t['amt']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+                      trailing: t['_historyKind'] == 'reward'
+                          ? Text('+ ${t['coins'] ?? 0} coins', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))
+                          : Text('₹${t['amt']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
                     );
                   },
                 ),
@@ -2025,9 +2038,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return DateTime.utc(rewardDay.year, rewardDay.month, rewardDay.day).millisecondsSinceEpoch - const Duration(minutes: 30).inMilliseconds;
   }
 
-  Future<void> _resetRewardsForNewIstDay() async {
+  Future<bool> _resetRewardsForNewIstDay() async {
     final today = _currentRewardDayKey();
-    if (_rewards['rewardDayKey'] == today) return;
+    if (_rewards['rewardDayKey'] == today && _num(_rewards['rewardDayStart']) == _currentRewardDayStart()) return true;
     final next = Map<String, dynamic>.from(_rewards);
     next['rewardDayKey'] = today;
     next['rewardDayStart'] = _currentRewardDayStart();
@@ -2035,7 +2048,7 @@ class _HomeScreenState extends State<HomeScreen> {
     next['streakClaimed'] = false;
     next['dailyBonusClaimed'] = false;
     next['updatedAt'] = {'.sv': 'timestamp'};
-    await _putRewards(next);
+    return await _putRewards(next);
   }
 
   Future<void> _startRewardCooldown() async {
@@ -2126,7 +2139,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _claimReward(String kind) async {
     if (_rewards.isEmpty) await _ensureRewards();
-    await _resetRewardsForNewIstDay();
+    if (!await _resetRewardsForNewIstDay()) return _msg('Daily reset save nahi hua. Rewards Refresh karke dobara try karein.');
     final current = Map<String, dynamic>.from(_rewards);
     final next = Map<String, dynamic>.from(current);
     var reward = 0;
