@@ -676,42 +676,32 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
         _matches = list;
-        // One-time Super Admin migration: persist stable sequential slots for older roster entries.
-        if (isSuperAdmin) {
-          final slotMigration = <String, dynamic>{};
+        // Save each legacy slot directly at its exact roster child path.
+        // A root /.json multi-location PATCH is subject to root-level rules and can be denied.
+        if (isSuperAdmin || _isCoAdmin) {
+          var migrationError = '';
           for (final match in list) {
             final players = match['players'];
-            if (players is Map) {
-              var slot = 0;
-              for (final entry in players.entries) {
-                slot++;
-                if (entry.value is Map && _num((entry.value as Map)['slotNumber']) <= 0) {
-                  slotMigration['matches/${match['id']}/players/${entry.key}/slotNumber'] = slot;
-                }
+            if (players is! Map) continue;
+            var slot = 0;
+            for (final entry in players.entries) {
+              slot++;
+              if (entry.value is! Map || _num((entry.value as Map)['slotNumber']) > 0) continue;
+              final slotRes = await http.put(
+                Uri.parse('$kDbUrl/matches/${match['id']}/players/${entry.key}/slotNumber.json?auth=${widget.token}'),
+                body: jsonEncode(slot),
+              );
+              if (slotRes.statusCode >= 200 && slotRes.statusCode < 300) {
+                (entry.value as Map)['slotNumber'] = slot;
+              } else {
+                migrationError = slotRes.body;
+                break;
               }
             }
+            if (migrationError.isNotEmpty) break;
           }
-          if (slotMigration.isNotEmpty) {
-            final migrationRes = await http.patch(
-              Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
-              body: jsonEncode(slotMigration),
-            );
-            if (migrationRes.statusCode < 200 || migrationRes.statusCode >= 300) {
-              _msg('Purane players ke slot numbers auto-save nahi ho paye: ${migrationRes.body}');
-            } else {
-              for (final match in list) {
-                final players = match['players'];
-                if (players is Map) {
-                  var slot = 0;
-                  for (final entry in players.entries) {
-                    slot++;
-                    if (entry.value is Map && _num((entry.value as Map)['slotNumber']) <= 0) {
-                      (entry.value as Map)['slotNumber'] = slot;
-                    }
-                  }
-                }
-              }
-            }
+          if (migrationError.isNotEmpty) {
+            _msg('Purane players ke slot numbers save nahi ho paye: $migrationError');
           }
         }
         _sortMatches();
@@ -1463,7 +1453,7 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Match Room Details'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           if (_slotNumberFor(m, widget.uid) > 0)
-            Align(alignment: Alignment.centerLeft, child: Text('Your Slot Number: #${_slotNumberFor(m, widget.uid)}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))),
+            Align(alignment: Alignment.centerLeft, child: Text('Your Slot: #${_slotNumberFor(m, widget.uid)}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: SelectableText('Room ID: ${m['rId']}')),
@@ -2022,6 +2012,25 @@ class _HomeScreenState extends State<HomeScreen> {
     final streak = _num(_rewards['streakDay']);
     final streakDone = _rewards['streakClaimed'] == true;
     final dailyDone = _rewards['dailyBonusClaimed'] == true;
+    final rewardUrlMissing = _rewardAdUrl.trim().isEmpty;
+    final windowStart = _num(_rewards['windowStart']);
+    final cooldownEnd = windowStart > 0 ? DateTime.fromMillisecondsSinceEpoch(windowStart).add(const Duration(hours: 24)) : DateTime.fromMillisecondsSinceEpoch(0);
+    final cooldown = cooldownEnd.difference(_clock);
+    final cooldownActive = cooldown.inSeconds > 0;
+    final cooldownLabel = cooldownActive
+        ? '${cooldown.inHours.toString().padLeft(2, '0')}:${(cooldown.inMinutes % 60).toString().padLeft(2, '0')}:${(cooldown.inSeconds % 60).toString().padLeft(2, '0')}'
+        : '';
+    final watchBlocked = rewardUrlMissing || cooldownActive || watched >= 20;
+    final streakBlocked = rewardUrlMissing || cooldownActive || streakDone;
+    final dailyBlocked = rewardUrlMissing || cooldownActive || dailyDone;
+    String rewardReason(String kind) {
+      if (rewardUrlMissing) return 'Reward Ads link missing — Admin settings mein real link set karein.';
+      if (cooldownActive) return 'Daily cooldown: $cooldownLabel remaining.';
+      if (kind == 'watch' && watched >= 20) return 'Aaj ke 20/20 Watch & Earn claims complete.';
+      if (kind == 'streak' && streakDone) return 'Daily Streak aaj claim ho chuka hai.';
+      if (kind == 'daily' && dailyDone) return 'Daily Bonus aaj claim ho chuka hai.';
+      return '';
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2036,15 +2045,15 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
             OutlinedButton(
-              onPressed: _rewardAdUrl.trim().isEmpty ? null : () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
+              onPressed: watchBlocked ? null : () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
               child: Text('Watch & Earn ($watched/20)'),
             ),
             OutlinedButton(
-              onPressed: _rewardAdUrl.trim().isEmpty ? null : () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
+              onPressed: streakBlocked ? null : () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
               child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
             ),
             OutlinedButton(
-              onPressed: _rewardAdUrl.trim().isEmpty ? null : () => _showTimedAd(title: 'Daily Bonus', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('daily')),
+              onPressed: dailyBlocked ? null : () => _showTimedAd(title: 'Daily Bonus', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('daily')),
               child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
             ),
             ElevatedButton(
@@ -2053,6 +2062,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
             ),
           ]),
+          if (watchBlocked) Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+          if (streakBlocked) Text(rewardReason('streak'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+          if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+          if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
           const Text('Reward Ads link Admin settings mein set hone ke baad claims available honge. Ad ko naturally load hone dein (aam taur par 15–30 sec); Close/Skip par destination ek baar open hoga. Fixed timer nahi hai. Firebase Spark client-only ad-view verify nahi karta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
@@ -2438,7 +2451,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: Text('#${_num(p['slotNumber']) > 0 ? p['slotNumber'] : i + 1} • ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      title: Text('Slot #${_num(p['slotNumber']) > 0 ? p['slotNumber'] : i + 1} • ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       subtitle: Text(
                         p['members'] is List
                           ? (p['members'] as List).asMap().entries.map((e) => '${e.key + 1}. ${(e.value as Map)['ign'] ?? '-'} • ID: ${(e.value as Map)['bgmiId'] ?? '-'}').join('\n')
@@ -2578,8 +2591,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ]),
                 ],
                 Text('Join: ${_isMatchCompleted(m) ? 'COMPLETED' : (closed ? 'CLOSED' : 'OPEN')} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : '15 min before match')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
-                if (joined && _slotNumberFor(m, widget.uid) > 0)
-                  Padding(padding: const EdgeInsets.only(top: 4), child: Text('Your Slot: #${_slotNumberFor(m, widget.uid)}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 12))),
                 if (joined || isAdmin) ...[
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -2631,7 +2642,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     onPressed: (joined || isFull || closed || isSuperAdmin) ? null : () => _startJoinAd(m),
                     child: Text(
-                      joined ? 'JOINED ✓' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isSuperAdmin ? 'SUPER ADMIN' : 'Join ₹${m['fee']}'))),
+                      joined ? 'JOINED ✓${_slotNumberFor(m, widget.uid) > 0 ? '  •  SLOT #${_slotNumberFor(m, widget.uid)}' : ''}' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isSuperAdmin ? 'SUPER ADMIN' : 'Join ₹${m['fee']}'))),
                       style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                     ),
                   ),
