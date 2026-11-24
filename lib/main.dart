@@ -545,7 +545,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _nextSlotNumber(Map m) {
     final players = m['players'];
-    var highest = 0;
+    var highest = players is Map ? players.length : (players is List ? players.length : 0);
     if (players is Map) {
       for (final value in players.values) {
         if (value is Map) highest = math.max(highest, _num(value['slotNumber']));
@@ -2371,13 +2371,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   void _showPlayers(Map m) {
     final pMap = m['players'] is Map ? m['players'] as Map : {};
-    final list = pMap.entries.toList()..sort((a, b) {
+    final originalEntries = pMap.entries.toList();
+    final originalPositions = <String, int>{for (var i = 0; i < originalEntries.length; i++) originalEntries[i].key.toString(): i + 1};
+    final list = originalEntries..sort((a, b) {
       final ap = a.value is Map ? _num((a.value as Map)['slotNumber']) : 0;
       final bp = b.value is Map ? _num((b.value as Map)['slotNumber']) : 0;
-      if (ap == 0 && bp == 0) return a.key.toString().compareTo(b.key.toString());
-      if (ap == 0) return 1;
-      if (bp == 0) return -1;
-      return ap.compareTo(bp);
+      final aSlot = ap > 0 ? ap : (originalPositions[a.key.toString()] ?? 0);
+      final bSlot = bp > 0 ? bp : (originalPositions[b.key.toString()] ?? 0);
+      return aSlot.compareTo(bSlot);
     });
     showDialog(
       context: context,
