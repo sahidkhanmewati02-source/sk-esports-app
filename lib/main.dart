@@ -497,6 +497,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _sortMatches() => _matches.sort((a, b) => _compareMatches(a as Map, b as Map));
+  int _teamSize(Map m) {
+    final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
+    if (mode.contains('SQUAD')) return 4;
+    if (mode.contains('DUO')) return 2;
+    return 1;
+  }
+
   int _matchPlayerCount(Map m) {
     final players = m['players'];
     if (players is Map) return players.length;
@@ -525,8 +532,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     final joinedCount = _num(match['joined']);
-    final joinedFallback = (joinedCount > rosterCount ? joinedCount : rosterCount) * fee;
-    final calculated = rosterTotal > joinedFallback ? rosterTotal : joinedFallback;
+    final joinedFallback = rosterCount == 0 ? joinedCount * fee : rosterTotal;
+    final calculated = joinedFallback;
     final saved = _num(hisaab['collection']);
     return calculated > saved ? calculated : saved;
   }
@@ -1613,79 +1620,157 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _join(Map m) {
-    final ignC = TextEditingController(text: _ign),
-        idC = TextEditingController(text: _bgmiId == 'Not Set' ? '' : _bgmiId);
+    final teamSize = _teamSize(m);
+    final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
+    final nameControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 ? _ign : ''));
+    final idControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 && _bgmiId != 'Not Set' ? _bgmiId : ''));
+    var useBonus = _num(_rewards['bonusWallet']) > 0;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Join ${m['title']}', style: const TextStyle(fontSize: 15)),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Rule: Minimum BGMI Level 30+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
-          const SizedBox(height: 8),
-          TextField(controller: ignC, decoration: const InputDecoration(labelText: 'BGMI Name (IGN)', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: idC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'BGMI ID (11 Digits)', border: OutlineInputBorder())),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
-            onPressed: () async {
-              if (ignC.text.trim().isEmpty || idC.text.trim().length < 10 || idC.text.trim().length > 11 || !RegExp(r'^\d+$').hasMatch(idC.text.trim())) {
-                return _msg('Sahi IGN aur BGMI ID dalein (10 se 11 digits)!');
-              }
-              if (_matchClosed(m) || _num(m['joined']) >= _num(m['slots'])) { Navigator.pop(ctx); return _msg('Join band ho chuka hai ya slots full hain.'); }
-              final fee = _num(m['fee']);
-              if ((_wallet - fee).isNegative) {
-                Navigator.pop(ctx);
-                setState(() => _tab = 1);
-                return _msg('Balance kam hai!');
-              }
-              final j = _num(m['joined']) + 1;
-              final oldBalance = _wallet;
-              Navigator.pop(ctx);
-              try {
-                final now = DateTime.now();
-                final playerBalance = oldBalance - fee;
-                final txnId = now.microsecondsSinceEpoch.toString();
-                final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-                final txn = {'title': 'Joined: ${m['title']}', 'sub': 'Entry fee added to match collection • $dt', 'amt': fee, 'status': 'PAID', 'time': dt};
-                final patch = <String, dynamic>{
-                  'users/${widget.uid}/wallet': playerBalance,
-                  'users/${widget.uid}/ign': ignC.text.trim(),
-                  'users/${widget.uid}/bgmiId': idC.text.trim(),
-                  'users/${widget.uid}/txns/$txnId': txn,
-                  'matches/${m['id']}/players/${widget.uid}': {
-                    'ign': ignC.text.trim(),
-                    'bgmiId': idC.text.trim(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final fee = _num(m['fee']);
+          final baseTotal = fee * teamSize;
+          final maxDiscount = baseTotal ~/ 10;
+          final discount = useBonus ? math.min(_num(_rewards['bonusWallet']), maxDiscount).toInt() : 0;
+          final payable = baseTotal - discount;
+          return AlertDialog(
+            title: Text('Join $mode • ${m['title']}', style: const TextStyle(fontSize: 15)),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('Rule: Har teammate ki BGMI Level 30+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                  const SizedBox(height: 8),
+                  for (var i = 0; i < teamSize; i++) ...[
+                    Align(alignment: Alignment.centerLeft, child: Text(i == 0 ? 'Team Leader' : 'Teammate ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
+                    const SizedBox(height: 5),
+                    TextField(controller: nameControllers[i], decoration: InputDecoration(labelText: 'BGMI Name (IGN) • ${i + 1}', border: const OutlineInputBorder())),
+                    const SizedBox(height: 7),
+                    TextField(controller: idControllers[i], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: InputDecoration(labelText: 'BGMI ID • ${i + 1}', border: const OutlineInputBorder())),
+                    const SizedBox(height: 10),
+                  ],
+                  if (_num(_rewards['bonusWallet']) > 0) SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: useBonus,
+                    onChanged: (v) => setDialogState(() => useBonus = v),
+                    title: const Text('Use Bonus Wallet discount', style: TextStyle(fontSize: 13)),
+                    subtitle: Text('Max 10%: up to ₹$maxDiscount • Available ₹${_num(_rewards['bonusWallet'])}', style: const TextStyle(fontSize: 11)),
+                  ),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Entry: ₹$fee × $teamSize = ₹$baseTotal'),
+                      Text('Bonus discount: −₹$discount', style: const TextStyle(color: Color(0xFF00E676))),
+                      Text('Pay from Main Wallet: ₹$payable', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    ]),
+                  ),
+                ]),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+                onPressed: () async {
+                  final members = <Map<String, dynamic>>[];
+                  for (var i = 0; i < teamSize; i++) {
+                    final ign = nameControllers[i].text.trim();
+                    final bgmiId = idControllers[i].text.trim();
+                    if (ign.isEmpty || bgmiId.length < 10 || bgmiId.length > 11 || !RegExp(r'^\\d+$').hasMatch(bgmiId)) {
+                      return _msg('Teammate ${i + 1} ka sahi BGMI Name aur 10–11 digit ID dalein.');
+                    }
+                    members.add({'ign': ign, 'bgmiId': bgmiId});
+                  }
+                  if (_matchClosed(m) || _matchPlayerCount(m) >= _num(m['slots'])) {
+                    Navigator.pop(ctx);
+                    return _msg('Join band ho chuka hai ya team slots full hain.');
+                  }
+                  if (_wallet < payable) {
+                    Navigator.pop(ctx);
+                    setState(() => _tab = 1);
+                    return _msg('Main Wallet balance kam hai!');
+                  }
+                  final oldBalance = _wallet;
+                  final oldBonus = _num(_rewards['bonusWallet']);
+                  final playerBalance = oldBalance - payable;
+                  final now = DateTime.now();
+                  final txnId = now.microsecondsSinceEpoch.toString();
+                  final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+                  final leader = members.first;
+                  final roster = <String, dynamic>{
+                    'ign': leader['ign'],
+                    'bgmiId': leader['bgmiId'],
+                    'members': members,
+                    'teamSize': teamSize,
                     'joinedAt': now.millisecondsSinceEpoch,
-                    'feePaid': fee,
-                  },
-                  'matches/${m['id']}/joined': {'.sv': {'increment': 1}},
-                };
-                final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
-                if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}). Wallet/slot update nahi hua.');
-                if (mounted) setState(() {
-                  _ign = ignC.text.trim();
-                  _bgmiId = idC.text.trim();
-                  _wallet = playerBalance;
-                  _txns.insert(0, {'id': txnId, ...txn});
-                  m['joined'] = j;
-                  m['isJoined'] = true;
-                  final players = m['players'] is Map ? Map<String,dynamic>.from(m['players']) : <String,dynamic>{};
-                  players[widget.uid] = {'ign': _ign, 'bgmiId': _bgmiId, 'joinedAt': now.millisecondsSinceEpoch, 'feePaid': fee};
-                  m['players'] = players;
-                });
-                _msg('Slot Confirmed! Wallet, roster aur transaction ek saath save hue.');
-              } catch (err) { _msg(err.toString().replaceAll('Exception: ', '')); _sync(); }
-            },
-            child: Text('Pay ₹${m['fee']}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ],
+                    'feePaid': payable,
+                    'baseFee': baseTotal,
+                    'bonusDiscount': discount,
+                  };
+                  final txn = {
+                    'title': 'Joined: ${m['title']}',
+                    'sub': '$mode • $teamSize member(s) • Base ₹$baseTotal • Bonus discount ₹$discount • $dt',
+                    'amt': payable,
+                    'status': 'PAID',
+                    'time': dt,
+                  };
+                  Navigator.pop(ctx);
+                  try {
+                    final patch = <String, dynamic>{
+                      'users/${widget.uid}/wallet': playerBalance,
+                      'users/${widget.uid}/ign': leader['ign'],
+                      'users/${widget.uid}/bgmiId': leader['bgmiId'],
+                      'users/${widget.uid}/txns/$txnId': txn,
+                      'matches/${m['id']}/players/${widget.uid}': roster,
+                      'matches/${m['id']}/joined': {'.sv': {'increment': 1}},
+                    };
+                    if (discount > 0) {
+                      final nextRewards = Map<String, dynamic>.from(_rewards);
+                      final used = nextRewards['discountsUsed'] is Map
+                          ? Map<String, dynamic>.from(nextRewards['discountsUsed'])
+                          : <String, dynamic>{};
+                      used[m['id'].toString()] = true;
+                      nextRewards['discountsUsed'] = used;
+                      nextRewards['discountMatchId'] = m['id'].toString();
+                      nextRewards['discountAmount'] = discount;
+                      nextRewards['bonusWallet'] = oldBonus - discount;
+                      nextRewards['updatedAt'] = {'.sv': 'timestamp'};
+                      patch['users/${widget.uid}/rewards'] = nextRewards;
+                    }
+                    final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+                    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}). Wallet/slot update nahi hua.');
+                    if (mounted) setState(() {
+                      _ign = leader['ign'].toString();
+                      _bgmiId = leader['bgmiId'].toString();
+                      _wallet = playerBalance;
+                      if (discount > 0) _rewards = Map<String, dynamic>.from(patch['users/${widget.uid}/rewards'] as Map);
+                      _txns.insert(0, {'id': txnId, ...txn});
+                      m['joined'] = _num(m['joined']) + 1;
+                      m['isJoined'] = true;
+                      final players = m['players'] is Map ? Map<String, dynamic>.from(m['players']) : <String, dynamic>{};
+                      players[widget.uid] = roster;
+                      m['players'] = players;
+                    });
+                    _msg('Team slot confirmed! Main Wallet ₹$payable paid; Bonus discount ₹$discount applied.');
+                  } catch (err) {
+                    _msg(err.toString().replaceAll('Exception: ', ''));
+                    _sync();
+                  }
+                },
+                child: Text('Pay ₹$payable', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
       ),
-    );
+    ).then((_) {
+      for (final c in nameControllers) { c.dispose(); }
+      for (final c in idControllers) { c.dispose(); }
+    });
   }
-
 
   Future<void> _ensureRewards() async {
     final initial = <String, dynamic>{
@@ -2073,7 +2158,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   'fee': _num(feeC.text),
                   'kill': _num(killC.text),
                   'win': _num(winC.text),
-                  'slots': mapC.text.trim().toLowerCase().contains('livik') ? 52 : 100,
+                  'slots': (mapC.text.trim().toLowerCase().contains('livik') ? 52 : 100) ~/ ((modeC.text.trim().toUpperCase().contains('SQUAD')) ? 4 : (modeC.text.trim().toUpperCase().contains('DUO') ? 2 : 1)),
                               'joined': 0,
             'rId': '15 min before match',
             'rPass': '****',
