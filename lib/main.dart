@@ -463,6 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool get isAdmin => isSuperAdmin || _isCoAdmin;
   int _tab = 0, _wallet = 0;
   Map<String, dynamic> _rewards = {};
+  List _rewardHistory = [];
   int _referralCount = 0, _referralEarnings = 0;
   String _referralCode = '', _referredBy = '';
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
@@ -661,17 +662,29 @@ class _HomeScreenState extends State<HomeScreen> {
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
         _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
+        _rewardHistory = d['rewardHistory'] is Map
+            ? (d['rewardHistory'] as Map).entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'id': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()..sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)))
+            : <dynamic>[];
         _referralCode = (d['referralCode'] ?? widget.uid).toString();
         _referralCount = _num(d['referralCount']);
         _referralEarnings = _num(d['referralEarnings']);
         _referredBy = (d['referredBy'] ?? '').toString();
         if (_rewards.isEmpty) {
           await _ensureRewards();
-        } else if (!_rewards.containsKey('discountsUsed') || !_rewards.containsKey('discountMatchId') || !_rewards.containsKey('discountAmount')) {
+        } else if (!_rewards.containsKey('discountsUsed') ||
+            !_rewards.containsKey('discountMatchId') ||
+            !_rewards.containsKey('discountAmount') ||
+            !_rewards.containsKey('rewardDayKey') ||
+            !_rewards.containsKey('rewardDayStart')) {
           final migrated = Map<String, dynamic>.from(_rewards);
           migrated['discountsUsed'] = migrated['discountsUsed'] is Map ? migrated['discountsUsed'] : <String, dynamic>{'_init': false};
           migrated['discountMatchId'] = migrated['discountMatchId'] ?? '';
           migrated['discountAmount'] = migrated['discountAmount'] ?? 0;
+          migrated['rewardDayKey'] = _currentRewardDayKey();
+          migrated['rewardDayStart'] = _currentRewardDayStart();
+          migrated['watchCount'] = 0;
+          migrated['streakClaimed'] = false;
+          migrated['dailyBonusClaimed'] = false;
           migrated['updatedAt'] = {'.sv': 'timestamp'};
           await _putRewards(migrated);
         }
@@ -1961,6 +1974,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'bonusWallet': 0,
       'windowStart': {'.sv': 'timestamp'},
       'rewardDayKey': _currentRewardDayKey(),
+      'rewardDayStart': _currentRewardDayStart(),
       'watchCount': 0,
       'streakDay': 0,
       'streakClaimed': false,
@@ -2004,11 +2018,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${rewardDay.year.toString().padLeft(4, '0')}-${rewardDay.month.toString().padLeft(2, '0')}-${rewardDay.day.toString().padLeft(2, '0')}';
   }
 
+  int _currentRewardDayStart() {
+    // 05:00 IST equals 23:30 UTC on the previous calendar day.
+    final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+    final rewardDay = ist.hour < 5 ? ist.subtract(const Duration(days: 1)) : ist;
+    return DateTime.utc(rewardDay.year, rewardDay.month, rewardDay.day).millisecondsSinceEpoch - const Duration(minutes: 30).inMilliseconds;
+  }
+
   Future<void> _resetRewardsForNewIstDay() async {
     final today = _currentRewardDayKey();
     if (_rewards['rewardDayKey'] == today) return;
     final next = Map<String, dynamic>.from(_rewards);
     next['rewardDayKey'] = today;
+    next['rewardDayStart'] = _currentRewardDayStart();
     next['watchCount'] = 0;
     next['streakClaimed'] = false;
     next['dailyBonusClaimed'] = false;
@@ -2108,10 +2130,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final current = Map<String, dynamic>.from(_rewards);
     final next = Map<String, dynamic>.from(current);
     var reward = 0;
+    String title;
     if (kind == 'watch') {
       if (_num(current['watchCount']) >= 20) return _msg('Aaj ke 20 Watch & Earn claims complete ho gaye. Reset 5:00 AM IST par hoga.');
       next['watchCount'] = _num(current['watchCount']) + 1;
       reward = 10;
+      title = 'Watch & Earn';
     } else if (kind == 'streak') {
       if (current['streakClaimed'] == true) return _msg('Daily Streak aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
       final day = (_num(current['streakDay']) % 7) + 1;
@@ -2119,17 +2143,50 @@ class _HomeScreenState extends State<HomeScreen> {
       reward = payouts[day - 1];
       next['streakDay'] = day;
       next['streakClaimed'] = true;
+      title = 'Daily Streak • Day $day';
     } else if (kind == 'daily') {
       if (current['dailyBonusClaimed'] == true) return _msg('Daily Bonus aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
       reward = math.Random.secure().nextInt(20) + 1;
       next['dailyBonusClaimed'] = true;
+      title = 'Daily Bonus';
     } else {
       return;
     }
-    next['rewardDayKey'] = _currentRewardDayKey();
+    final dayKey = _currentRewardDayKey();
+    final dayStart = _currentRewardDayStart();
+    next['rewardDayKey'] = dayKey;
+    next['rewardDayStart'] = dayStart;
     next['coins'] = _num(current['coins']) + reward;
     next['updatedAt'] = {'.sv': 'timestamp'};
-    if (!await _putRewards(next)) return _msg('Reward claim Rules ne reject kiya. Refresh karke dobara try karein.');
+    final historyId = DateTime.now().microsecondsSinceEpoch.toString();
+    final history = <String, dynamic>{
+      'type': kind,
+      'title': title,
+      'coins': reward,
+      'watchCount': _num(next['watchCount']),
+      'streakDay': _num(next['streakDay']),
+      'rewardDayKey': dayKey,
+      'createdAt': {'.sv': 'timestamp'},
+    };
+    final patch = <String, dynamic>{
+      'users/${widget.uid}/rewards': next,
+      'users/${widget.uid}/rewardHistory/$historyId': history,
+    };
+    final res = await http.patch(
+      Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
+      body: jsonEncode(patch),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      return _msg('Reward save fail (${res.statusCode}): ${res.body}');
+    }
+    _rewards = next;
+    _rewardHistory.insert(0, {
+      'id': historyId,
+      ...history,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    _rewardHistory.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
+    if (mounted) setState(() {});
     _msg('Mubarak! $reward coins Bonus Wallet rewards mein add hue.');
   }
 
@@ -2238,6 +2295,18 @@ class _HomeScreenState extends State<HomeScreen> {
             if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
           ],
           if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          if (_rewardHistory.isNotEmpty) ...[
+            const Divider(height: 18),
+            const Text('REWARD CLAIM HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+            ..._rewardHistory.take(10).map((entry) => ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.stars, color: Color(0xFFFF9800), size: 18),
+              title: Text('${entry['title'] ?? 'Reward'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              subtitle: Text(_formatHistoryDateTime(entry), style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              trailing: Text('+ ${entry['coins'] ?? 0} coins', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+            )),
+          ],
           const Text('20 Watch & Earn + 1 Daily Streak + 1 Daily Bonus = max 22 rewarded ads/day. Reset daily 5:00 AM IST par hota hai. Unity Ads duration Unity decide karta hai; har ad ke baad 5-second cooldown hai. Firebase Spark client-only setup ad views/reward claims ko fully tamper-proof nahi bana sakta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
