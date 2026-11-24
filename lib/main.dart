@@ -1401,9 +1401,1651 @@ class _HomeScreenState extends State<HomeScreen> {
         if (dt != null) return dt.millisecondsSinceEpoch;
       }
     }
-    final rawTime = (entry['time'] ?? '').toString();
+    final rawTime = (entry['time'] ?? '').toString().trim();
     final parsedTime = DateTime.tryParse(rawTime);
     if (parsedTime != null) return parsedTime.millisecondsSinceEpoch;
+    final legacyMatch = RegExp(r'^(\\d{2})/(\\d{2})/(\\d{4}) (\\d{2}):(\\d{2})
+    final id = int.tryParse((entry['id'] ?? '').toString());
+    if (id != null && id > 0) return id > 100000000000000 ? id ~/ 1000 : id;
+    return 0;
+  }
+
+  String _formatHistoryDateTime(Map entry) {
+    final millis = _historyTimestamp(entry);
+    if (millis <= 0) return 'Date/time unavailable';
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year.toString().padLeft(4, '0');
+    final hour = dt.hour.toString().padLeft(2, '0');
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year $hour:$minute';
+  }
+
+  void _showHistory([Map? player]) {
+    final list = [];
+    final target = player == null ? _users : [player];
+    for (final u in target) {
+      if (u['txns'] is Map) {
+        (u['txns'] as Map).forEach((txnKey, v) {
+          if (v is Map) list.add({
+            ...Map<String, dynamic>.from(v),
+            'id': txnKey.toString(),
+            'ign': u['ign'] ?? 'Player',
+          });
+        });
+      }
+    }
+    list.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(player == null ? 'All Players History (${list.length})' : '${player['ign']} History (${list.length})', style: const TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 360,
+          child: list.isEmpty
+              ? const Center(child: Text('Koi history nahi mili'))
+              : ListView.builder(
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final t = list[i];
+                    return ListTile(
+                      dense: true,
+                      title: Text('${player == null ? '${t['ign']} • ' : ''}${t['title']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      subtitle: Text(
+                        '${t['sub'] ?? ''} • ${t['status'] ?? ''}\n${_formatHistoryDateTime(t)}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      trailing: Text('₹${t['amt']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+                    );
+                  },
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+
+  Future<void> _showTimedAd({required String title, required String url, required int? seconds, required VoidCallback onContinue}) async {
+    final trimmedUrl = url.trim();
+    final uri = _resolveAdTarget(trimmedUrl);
+    if (trimmedUrl.isEmpty || uri == null) {
+      if (seconds == null) {
+        _msg('Reward Ad link valid nahi hai. Admin se valid Adsterra URL set karwayein.');
+        return;
+      }
+      onContinue();
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AdViewerDialog(title: title, url: uri.toString(), seconds: seconds, onContinue: onContinue, openExternalOnClose: seconds == null),
+    );
+  }
+
+  void _startJoinAd(Map m) {
+    _showTimedAd(title: 'Sponsored Link', url: _joinAdUrl, seconds: 10, onContinue: () => _join(m));
+  }
+
+  void _showRoomAfterAd(Map m) {
+    // Room details are shown directly; the match release-time check remains active.
+    if (!mounted) return;
+      if (!_roomAvailable(m)) {
+        showDialog(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('Room ID / Password'),
+          content: const Text('Room ID & Password match start hone se 15 minutes pehle yahin show hoga.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        ));
+        return;
+      }
+      showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Match Room Details'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_slotNumberFor(m, widget.uid) > 0)
+            Align(alignment: Alignment.centerLeft, child: Text('Your Slot: #${_slotNumberFor(m, widget.uid)}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: SelectableText('Room ID: ${m['rId']}')),
+            TextButton.icon(onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: '${m['rId'] ?? ''}'));
+              if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Room ID copied!')));
+            }, icon: const Icon(Icons.copy, size: 16), label: const Text('Copy')),
+          ]),
+          Row(children: [
+            Expanded(child: SelectableText('Password: ${m['rPass']}')),
+            TextButton.icon(onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: '${m['rPass'] ?? ''}'));
+              if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Password copied!')));
+            }, icon: const Icon(Icons.copy, size: 16), label: const Text('Copy')),
+          ]),
+        ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ));
+  }
+
+  void _saveAdAndPromoConfig() async {
+    _joinAdUrl = _joinAdUrlController.text.trim();
+    _roomAdUrl = _roomAdUrlController.text.trim();
+    _rewardAdUrl = _rewardAdUrlController.text.trim();
+    _promoImageUrl = _promoImageUrlController.text.trim();
+    _promoClickUrl = _promoClickUrlController.text.trim();
+    final data = {
+      'joinAdUrl': _joinAdUrl,
+      'roomAdUrl': _roomAdUrl,
+      'rewardAdUrl': _rewardAdUrlController.text.trim(),
+      'promoImageUrl': _promoImageUrl,
+      'promoClickUrl': _promoClickUrl,
+      'promoEnabled': _promoEnabled,
+      'adsterraBannerCode': _adsterraBannerCodeController.text.trim(),
+      'autoBannerAdEnabled': _autoBannerAdEnabled,
+      'unityGameId': _unityGameIdController.text.trim(),
+      'unityRewardedPlacementId': _unityPlacementIdController.text.trim(),
+      'unityTestMode': _unityTestMode,
+    };
+    _adsterraBannerCode = _adsterraBannerCodeController.text.trim();
+    _unityGameId = _unityGameIdController.text.trim();
+    _unityRewardedPlacementId = _unityPlacementIdController.text.trim();
+    final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode(data));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      _msg('Ad, Promo aur Unity Ads settings saved!');
+      if (mounted) setState(() {});
+    } else {
+      _msg('Settings save nahi hui. Firebase permission check karein.');
+    }
+  }
+
+  Future<void> _loadChat() async {
+    final res = await http.get(Uri.parse('$kDbUrl/chat.json?auth=' + widget.token));
+    if (res.statusCode == 200) {
+      final list = <Map>[];
+      if (res.body != 'null') (jsonDecode(res.body) as Map).forEach((k, v) { if (v is Map) list.add({...v, 'id': k}); });
+      list.sort((a,b) { final p = (b['pinned'] == true ? 1 : 0).compareTo(a['pinned'] == true ? 1 : 0); return p != 0 ? p : _num(a['createdAt']).compareTo(_num(b['createdAt'])); });
+      if (mounted) setState(() => _chatMessages = list);
+    }
+  }
+  Future<void> _sendChat() async {
+    final msg = _chatC.text.trim();
+    if (msg.isEmpty) return;
+    final modRes = await http.get(Uri.parse('$kDbUrl/chatModeration/' + widget.uid + '.json?auth=' + widget.token));
+    final mod = modRes.statusCode == 200 && modRes.body != 'null' ? jsonDecode(modRes.body) as Map : <String,dynamic>{};
+    final until = _num(mod['muteUntil']);
+    if (until > DateTime.now().millisecondsSinceEpoch) return _msg('Aap muted hain. ' + (((until - DateTime.now().millisecondsSinceEpoch) / 60000).ceil()).toString() + ' minute baad try karein.');
+    final privileged = isAdmin;
+    final hasLink = RegExp(r'(https?://|www\.|t\.me/|discord\.gg/|chat\.whatsapp\.com/)', caseSensitive: false).hasMatch(msg);
+    if (!privileged && hasLink) return _msg('Players chat mein links/invites allowed nahi hain.');
+    final badWords = ['fuck','shit','bitch','asshole','madarchod','bhenchod','behenchod','chutiya','gandu','harami','randi','mc','bc'];
+    final found = !privileged && badWords.any((w) => RegExp(r'(^|[^a-z])' + RegExp.escape(w) + r'([^a-z]|$)', caseSensitive:false).hasMatch(msg));
+    if (found) {
+      final strikes = _num(mod['strikes']) + 1;
+      if (strikes == 1) return _msg('Warning 1/3: abusive language allowed nahi hai.');
+      return _msg('Abusive language allowed nahi hai. Agla message bhejne se pehle language change karein.');
+    }
+    final data = {'uid': widget.uid, 'ign': _ign, 'email': widget.email, 'message': msg, 'createdAt': DateTime.now().millisecondsSinceEpoch, 'pinned': false, 'role': isSuperAdmin ? 'superadmin' : (_isCoAdmin ? 'coadmin' : 'player')};
+    final res = await http.post(Uri.parse('$kDbUrl/chat.json?auth=' + widget.token), body: jsonEncode(data));
+    if (res.statusCode >= 200 && res.statusCode < 300) { _chatC.clear(); await _loadChat(); } else { _msg('Message send nahi hua. Firebase Rules check karein.'); }
+  }
+  Future<void> _chatAction(Map m, String action) async {
+    final path = '$kDbUrl/chat/' + m['id'].toString() + '.json?auth=' + widget.token;
+    final res = action == 'delete' ? await http.delete(Uri.parse(path)) : await http.patch(Uri.parse(path), body: jsonEncode({'pinned': m['pinned'] != true}));
+    if (res.statusCode >= 200 && res.statusCode < 300) await _loadChat(); else _msg('Chat action failed. Firebase Rules check karein.');
+  }
+  Widget _chatPage() {
+    // reverse:true ke saath newest message index 0 par rakhein.
+    final sorted = [..._chatMessages]..sort((a,b) => _num(b['createdAt']).compareTo(_num(a['createdAt'])));
+    return Column(children: [
+      Padding(padding: const EdgeInsets.all(10), child: Row(children: [const Expanded(child: Text('SK ESPORTS Community Chat', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))), IconButton(onPressed: _loadChat, icon: const Icon(Icons.refresh))])),
+      Expanded(child: sorted.isEmpty ? const Center(child: Text('Abhi chat khaali hai. Pehla message bhejein!')) : ListView.builder(
+        reverse: true,
+        shrinkWrap: false,
+        itemCount: sorted.length,
+        itemBuilder: (_, i) {
+        final m = sorted[i];
+        final ign = m['ign']?.toString() ?? 'Player';
+        return Card(child: ListTile(
+          leading: CircleAvatar(child: Text(ign.isNotEmpty ? ign[0].toUpperCase() : 'P')),
+          title: Row(children: [Expanded(child: Text(ign, style: const TextStyle(fontWeight: FontWeight.bold))), if (m['pinned'] == true) const Icon(Icons.push_pin, color: Colors.amber, size: 16)]),
+          subtitle: Text(m['message']?.toString() ?? ''),
+          trailing: isSuperAdmin ? PopupMenuButton<String>(onSelected: (v) => _chatAction(m, v), itemBuilder: (_) => [PopupMenuItem(value: 'pin', child: Text(m['pinned'] == true ? 'Unpin' : 'Pin')), const PopupMenuItem(value: 'delete', child: Text('Delete'))]) : null,
+        ));
+      })),
+      SafeArea(child: Padding(padding: const EdgeInsets.all(10), child: Row(children: [Expanded(child: TextField(controller: _chatC, minLines: 1, maxLines: 4, decoration: const InputDecoration(hintText: 'Message as BGMI IGN', border: OutlineInputBorder()))), const SizedBox(width: 8), IconButton(onPressed: _sendChat, icon: const Icon(Icons.send, color: Color(0xFFFF9800)))]))),
+    ]);
+  }
+  Future<void> _saveAboutRules() async {
+    final links = <Map<String,String>>[];
+    for (final line in _aboutLinksC.text.split('\n')) {
+      final parts = line.split('|');
+      if (parts.length < 2) continue;
+      final label = parts.first.trim(), url = parts.sublist(1).join('|').trim();
+      if (label.isNotEmpty && (url.startsWith('https://') || url.startsWith('http://')) && Uri.tryParse(url) != null) links.add({'label': label, 'url': url});
+    }
+    final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=' + widget.token), body: jsonEncode({'aboutLinks': links, 'rulesText': _rulesC.text.trim()}));
+    if (res.statusCode >= 200 && res.statusCode < 300) { setState(() { _aboutLinks = links; _rulesText = _rulesC.text.trim(); }); _msg('About & Rules save ho gaye.'); } else _msg('About & Rules save nahi hue. Firebase Rules check karein.');
+  }
+  Future<void> _toggleCoAdmin(Map user) async {
+    if (!isSuperAdmin || user['email']?.toString().toLowerCase() == kAdmin.toLowerCase()) return;
+    final make = user['role'] != 'coadmin';
+    final res = await http.patch(Uri.parse('$kDbUrl/users/' + user['uid'].toString() + '.json?auth=' + widget.token), body: jsonEncode({'role': make ? 'coadmin' : 'player'}));
+    if (res.statusCode >= 200 && res.statusCode < 300) { _msg(make ? 'Co-Admin bana diya.' : 'Co-Admin role hata diya.'); _sync(); } else _msg('Role update nahi hua. Firebase Rules check karein.');
+  }
+  int get _activeCoAdminCount => _users.where((u) => u['email']?.toString().toLowerCase() != kAdmin.toLowerCase() && u['role'] == 'coadmin').length;
+
+
+  void _showCoAdminDialog() {
+    if (!isSuperAdmin) return;
+    final searchC = TextEditingController();
+    int selectedTab = 0;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final q = searchC.text.trim().toLowerCase();
+          final players = _users.where((u) {
+            if (u['email']?.toString().toLowerCase() == kAdmin.toLowerCase()) return false;
+            final name = (u['name'] ?? '').toString().toLowerCase();
+            final ign = (u['ign'] ?? '').toString().toLowerCase();
+            final email = (u['email'] ?? '').toString().toLowerCase();
+            return q.isEmpty || name.contains(q) || ign.contains(q) || email.contains(q);
+          }).toList();
+          final coAdmins = players.where((u) => u['role'] == 'coadmin').toList();
+          final active = coAdmins.length;
+          final visibleUsers = selectedTab == 0 ? players : coAdmins;
+
+          return AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            title: Text('Co-Admin Management ($active)', style: const TextStyle(fontSize: 16)),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 460,
+              child: Column(
+                children: [
+                  TextField(
+                    controller: searchC,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Search Name, IGN or Email...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Text('All Players'),
+                          selected: selectedTab == 0,
+                          onSelected: (_) => setDialogState(() => selectedTab = 0),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: Text('Co-Admins ($active)'),
+                          selected: selectedTab == 1,
+                          onSelected: (_) => setDialogState(() => selectedTab = 1),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: visibleUsers.isEmpty
+                        ? Center(
+                            child: Text(
+                              selectedTab == 1 ? 'No Co-Admins added yet' : 'Koi player nahi mila',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: visibleUsers.length,
+                            itemBuilder: (_, i) {
+                              final u = visibleUsers[i];
+                              final isCoAdmin = u['role'] == 'coadmin';
+                              final ign = (u['ign'] ?? u['name'] ?? 'Player').toString();
+                              final email = (u['email'] ?? '').toString();
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 7),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              ign,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                            ),
+                                          ),
+                                          if (isCoAdmin)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFFF9800).withOpacity(0.18),
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                              child: const Text(
+                                                'CO-ADMIN',
+                                                maxLines: 1,
+                                                style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFFF9800)),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: TextButton(
+                                          onPressed: () async {
+                                            await _toggleCoAdmin(u);
+                                            if (ctx.mounted) setDialogState(() {});
+                                          },
+                                          child: Text(selectedTab == 1 ? 'Remove' : (isCoAdmin ? 'Remove' : 'Make Co-Admin')),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+            ],
+          );
+        },
+      ),
+    ).then((_) => searchC.dispose());
+  }
+
+  void _join(Map m) {
+    final teamSize = _teamSize(m);
+    final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
+    final matchId = m['id'].toString();
+    final usedDiscounts = _rewards['discountsUsed'] is Map ? _rewards['discountsUsed'] as Map : <dynamic, dynamic>{};
+    final hasDiscountReservation = usedDiscounts[matchId] == true && _rewards['discountMatchId']?.toString() == matchId && _num(_rewards['discountAmount']) > 0;
+    final previouslyDiscounted = usedDiscounts[matchId] == true && !hasDiscountReservation;
+    final lastDiscountMatchId = (_rewards['discountMatchId'] ?? '').toString();
+    final lastDiscountConsumed = lastDiscountMatchId.isNotEmpty && _matches.any((x) => x['id']?.toString() == lastDiscountMatchId && x['players'] is Map && (x['players'] as Map).containsKey(widget.uid));
+    final hasOtherReservation = lastDiscountMatchId.isNotEmpty && lastDiscountMatchId != matchId && _num(_rewards['discountAmount']) > 0 && !lastDiscountConsumed;
+    final nameControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 ? _ign : ''));
+    final idControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 && _bgmiId != 'Not Set' ? _bgmiId : ''));
+    var useBonus = hasDiscountReservation || (!hasOtherReservation && _num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted);
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final fee = _num(m['fee']);
+          final baseTotal = fee * teamSize;
+          final maxDiscount = baseTotal ~/ 10;
+          final discount = hasDiscountReservation
+              ? _num(_rewards['discountAmount'])
+              : (useBonus ? math.min(_num(_rewards['bonusWallet']), maxDiscount).toInt() : 0);
+          final payable = baseTotal - discount;
+          return AlertDialog(
+            title: Text('Join $mode • ${m['title']}', style: const TextStyle(fontSize: 15)),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('Rule: Har teammate ki BGMI Level 30+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                  const SizedBox(height: 8),
+                  for (var i = 0; i < teamSize; i++) ...[
+                    Align(alignment: Alignment.centerLeft, child: Text(i == 0 ? 'Team Leader' : 'Teammate ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
+                    const SizedBox(height: 5),
+                    TextField(controller: nameControllers[i], decoration: InputDecoration(labelText: 'BGMI Name (IGN) • ${i + 1}', border: const OutlineInputBorder())),
+                    const SizedBox(height: 7),
+                    TextField(controller: idControllers[i], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: InputDecoration(labelText: 'BGMI ID • ${i + 1}', border: const OutlineInputBorder())),
+                    const SizedBox(height: 10),
+                  ],
+                  if (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted && !hasDiscountReservation && !hasOtherReservation) SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: useBonus,
+                    onChanged: (v) => setDialogState(() => useBonus = v),
+                    title: const Text('Use Bonus Wallet discount', style: TextStyle(fontSize: 13)),
+                    subtitle: Text('Max 10%: up to ₹$maxDiscount • Available ₹${_num(_rewards['bonusWallet'])}', style: const TextStyle(fontSize: 11)),
+                  ),
+                  if (hasDiscountReservation) Text('Reserved Bonus discount ₹$discount is ready for this match.', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676))),
+                  if (hasOtherReservation) const Text('Pehle reserved match join complete karein; phir next match discount use hoga.', style: TextStyle(fontSize: 11, color: Colors.amber)),
+                  if (previouslyDiscounted) const Text('Is match mein aapka Bonus discount pehle use ho chuka hai.', style: TextStyle(fontSize: 11, color: Colors.amber)),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Entry: ₹$fee × $teamSize = ₹$baseTotal'),
+                      Text('Bonus discount: −₹$discount', style: const TextStyle(color: Color(0xFF00E676))),
+                      Text('Pay from Main Wallet: ₹$payable', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    ]),
+                  ),
+                ]),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+                onPressed: () async {
+                  final members = <Map<String, dynamic>>[];
+                  for (var i = 0; i < teamSize; i++) {
+                    final ign = nameControllers[i].text.trim();
+                    final bgmiId = idControllers[i].text.trim();
+                    if (ign.isEmpty || bgmiId.length < 10 || bgmiId.length > 11 || !RegExp(r'^\d{10,11}$').hasMatch(bgmiId)) {
+                      return _msg('Teammate ${i + 1} ka sahi BGMI Name aur 10–11 digit ID dalein.');
+                    }
+                    members.add({'ign': ign, 'bgmiId': bgmiId});
+                  }
+                  if (_matchClosed(m) || _matchPlayerCount(m) >= _num(m['slots'])) {
+                    Navigator.pop(ctx);
+                    return _msg('Join band ho chuka hai ya team slots full hain.');
+                  }
+                  if (_wallet < payable) {
+                    Navigator.pop(ctx);
+                    setState(() => _tab = 1);
+                    return _msg('Main Wallet balance kam hai!');
+                  }
+                  final oldBalance = _wallet;
+                  final oldBonus = _num(_rewards['bonusWallet']);
+                  final playerBalance = oldBalance - payable;
+                  final now = DateTime.now();
+                  final txnId = now.microsecondsSinceEpoch.toString();
+                  final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+                  final leader = members.first;
+                  final slotNumber = _nextSlotNumber(m);
+                  final roster = <String, dynamic>{
+                    'slotNumber': slotNumber,
+                    'ign': leader['ign'],
+                    'bgmiId': leader['bgmiId'],
+                    'members': members,
+                    'teamSize': teamSize,
+                    'joinedAt': now.millisecondsSinceEpoch,
+                    'feePaid': payable,
+                    'baseFee': baseTotal,
+                    'bonusDiscount': discount,
+                  };
+                  final txn = {
+                    'title': 'Joined: ${m['title']}',
+                    'sub': '$mode • $teamSize member(s) • Base ₹$baseTotal • Bonus discount ₹$discount • $dt',
+                    'amt': payable,
+                    'status': 'PAID',
+                    'time': dt,
+                  };
+                  Navigator.pop(ctx);
+                  try {
+                    final patch = <String, dynamic>{
+                      'users/${widget.uid}/wallet': playerBalance,
+                      'users/${widget.uid}/ign': leader['ign'],
+                      'users/${widget.uid}/bgmiId': leader['bgmiId'],
+                      'users/${widget.uid}/txns/$txnId': txn,
+                      'matches/${m['id']}/players/${widget.uid}': roster,
+                      };
+                    if (discount > 0 && !hasDiscountReservation) {
+                      final nextRewards = Map<String, dynamic>.from(_rewards);
+                      final used = nextRewards['discountsUsed'] is Map
+                          ? Map<String, dynamic>.from(nextRewards['discountsUsed'])
+                          : <String, dynamic>{'_init': false};
+                      used[matchId] = true;
+                      nextRewards['discountsUsed'] = used;
+                      nextRewards['discountMatchId'] = matchId;
+                      nextRewards['discountAmount'] = discount;
+                      nextRewards['bonusWallet'] = oldBonus - discount;
+                      nextRewards['updatedAt'] = {'.sv': 'timestamp'};
+                      if (!await _putRewards(nextRewards)) {
+                        return _msg('Bonus discount reserve nahi hua. Main Wallet se payment nahi li gayi.');
+                      }
+                    }
+                    final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+                    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}): ${res.body}. Wallet/slot update nahi hua.');
+                    if (mounted) setState(() {
+                      _ign = leader['ign'].toString();
+                      _bgmiId = leader['bgmiId'].toString();
+                      _wallet = playerBalance;
+                      _txns.insert(0, {'id': txnId, ...txn});
+                      final players = m['players'] is Map ? Map<String, dynamic>.from(m['players']) : <String, dynamic>{};
+                      players[widget.uid] = roster;
+                      m['players'] = players;
+                      m['joined'] = players.length;
+                      m['isJoined'] = true;
+                    });
+                    _msg('Team slot confirmed! Main Wallet ₹$payable paid; Bonus discount ₹$discount applied.');
+                  } catch (err) {
+                    _msg(err.toString().replaceAll('Exception: ', ''));
+                    _sync();
+                  }
+                },
+                child: Text('Pay ₹$payable', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    ).then((_) {
+      for (final c in nameControllers) { c.dispose(); }
+      for (final c in idControllers) { c.dispose(); }
+    });
+  }
+
+  Future<void> _ensureRewards() async {
+    final initial = <String, dynamic>{
+      'coins': 0,
+      'bonusWallet': 0,
+      'windowStart': {'.sv': 'timestamp'},
+      'rewardDayKey': _currentRewardDayKey(),
+      'watchCount': 0,
+      'streakDay': 0,
+      'streakClaimed': false,
+      'dailyBonusClaimed': false,
+      'discountMatchId': '',
+      'discountAmount': 0,
+      'discountsUsed': <String, dynamic>{'_init': false},
+      'updatedAt': {'.sv': 'timestamp'},
+    };
+    final res = await http.put(
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+      body: jsonEncode(initial),
+    );
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      try {
+        final saved = jsonDecode(res.body);
+        if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
+      } catch (_) { _rewards = initial; }
+    }
+  }
+
+  Future<bool> _putRewards(Map<String, dynamic> value) async {
+    final res = await http.put(
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+      body: jsonEncode(value),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) return false;
+    try {
+      final saved = jsonDecode(res.body);
+      if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
+      else _rewards = value;
+    } catch (_) { _rewards = value; }
+    if (mounted) setState(() {});
+    return true;
+  }
+
+  String _currentRewardDayKey() {
+    // Rewards reset at 05:00 India Standard Time (UTC+05:30).
+    final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+    final rewardDay = ist.hour < 5 ? ist.subtract(const Duration(days: 1)) : ist;
+    return '${rewardDay.year.toString().padLeft(4, '0')}-${rewardDay.month.toString().padLeft(2, '0')}-${rewardDay.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _resetRewardsForNewIstDay() async {
+    final today = _currentRewardDayKey();
+    if (_rewards['rewardDayKey'] == today) return;
+    final next = Map<String, dynamic>.from(_rewards);
+    next['rewardDayKey'] = today;
+    next['watchCount'] = 0;
+    next['streakClaimed'] = false;
+    next['dailyBonusClaimed'] = false;
+    next['updatedAt'] = {'.sv': 'timestamp'};
+    await _putRewards(next);
+  }
+
+  Future<void> _startRewardCooldown() async {
+    final now = DateTime.now();
+    _rewardCooldownUntil = now.add(const Duration(seconds: 5));
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('unity_reward_last_finished_at', now.millisecondsSinceEpoch);
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  Future<bool> _showUnityRewardedAd() async {
+    if (_rewardAdBusy) return false;
+    if (_unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty) {
+      _msg('Unity Ads Game ID aur Rewarded Placement ID Admin Settings mein set karein.');
+      return false;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastFinished = prefs.getInt('unity_reward_last_finished_at') ?? 0;
+      if (lastFinished > 0) {
+        final allowedAt = DateTime.fromMillisecondsSinceEpoch(lastFinished).add(const Duration(seconds: 5));
+        if (DateTime.now().isBefore(allowedAt)) {
+          _rewardCooldownUntil = allowedAt;
+          if (mounted) setState(() {});
+          _msg('Agla rewarded ad 5 seconds baad available hoga.');
+          return false;
+        }
+      }
+    } catch (_) {}
+    setState(() => _rewardAdBusy = true);
+    var adStarted = false;
+    var cooldownMarked = false;
+    Future<void> markCooldownOnce() async {
+      if (!adStarted || cooldownMarked) return;
+      cooldownMarked = true;
+      await _startRewardCooldown();
+    }
+    try {
+      if (!await UnityAds.isInitialized()) {
+        final initialized = Completer<void>();
+        await UnityAds.init(
+          gameId: _unityGameId.trim(),
+          testMode: _unityTestMode,
+          onComplete: () { if (!initialized.isCompleted) initialized.complete(); },
+          onFailed: (error, message) { if (!initialized.isCompleted) initialized.completeError(Exception('Unity Ads init failed: $message')); },
+        );
+        await initialized.future.timeout(const Duration(seconds: 30));
+      }
+      final loaded = Completer<void>();
+      await UnityAds.load(
+        placementId: _unityRewardedPlacementId.trim(),
+        onComplete: (_) { if (!loaded.isCompleted) loaded.complete(); },
+        onFailed: (_, error, message) { if (!loaded.isCompleted) loaded.completeError(Exception('Unity rewarded ad load failed: $message')); },
+      );
+      await loaded.future.timeout(const Duration(seconds: 45));
+      final finished = Completer<bool>();
+      await UnityAds.showVideoAd(
+        placementId: _unityRewardedPlacementId.trim(),
+        onStart: (_) { adStarted = true; },
+        onSkipped: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(false); },
+        onComplete: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(true); },
+        onFailed: (_, error, message) {
+          markCooldownOnce();
+          if (!finished.isCompleted) finished.complete(false);
+          if (mounted) _msg('Unity Ads show failed: $message');
+        },
+      );
+      final completed = await finished.future.timeout(const Duration(minutes: 3), onTimeout: () => false);
+      if (completed) return true;
+      _msg('Ad complete nahi hua; reward coins add nahi hue.');
+      return false;
+    } catch (error) {
+      await markCooldownOnce();
+      _msg(error.toString().replaceFirst('Exception: ', ''));
+      return false;
+    } finally {
+      if (mounted) setState(() => _rewardAdBusy = false);
+    }
+  }
+
+  Future<void> _startUnityReward(String kind) async {
+    if (_rewardAdBusy) return;
+    final completed = await _showUnityRewardedAd();
+    if (completed && mounted) await _claimReward(kind);
+  }
+
+  Future<void> _claimReward(String kind) async {
+    if (_rewards.isEmpty) await _ensureRewards();
+    await _resetRewardsForNewIstDay();
+    final current = Map<String, dynamic>.from(_rewards);
+    final next = Map<String, dynamic>.from(current);
+    var reward = 0;
+    if (kind == 'watch') {
+      if (_num(current['watchCount']) >= 20) return _msg('Aaj ke 20 Watch & Earn claims complete ho gaye. Reset 5:00 AM IST par hoga.');
+      next['watchCount'] = _num(current['watchCount']) + 1;
+      reward = 10;
+    } else if (kind == 'streak') {
+      if (current['streakClaimed'] == true) return _msg('Daily Streak aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
+      final day = (_num(current['streakDay']) % 7) + 1;
+      const payouts = [10, 15, 20, 25, 30, 35, 40];
+      reward = payouts[day - 1];
+      next['streakDay'] = day;
+      next['streakClaimed'] = true;
+    } else if (kind == 'daily') {
+      if (current['dailyBonusClaimed'] == true) return _msg('Daily Bonus aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
+      reward = math.Random.secure().nextInt(20) + 1;
+      next['dailyBonusClaimed'] = true;
+    } else {
+      return;
+    }
+    next['rewardDayKey'] = _currentRewardDayKey();
+    next['coins'] = _num(current['coins']) + reward;
+    next['updatedAt'] = {'.sv': 'timestamp'};
+    if (!await _putRewards(next)) return _msg('Reward claim Rules ne reject kiya. Refresh karke dobara try karein.');
+    _msg('Mubarak! $reward coins Bonus Wallet rewards mein add hue.');
+  }
+
+  Future<void> _exchangeCoins() async {
+    final coins = _num(_rewards['coins']);
+    final rupees = coins ~/ 100;
+    if (rupees < 1) return _msg('Exchange ke liye kam se kam 100 coins chahiye.');
+    final next = Map<String, dynamic>.from(_rewards);
+    next['coins'] = coins - (rupees * 100);
+    next['bonusWallet'] = _num(_rewards['bonusWallet']) + rupees;
+    next['updatedAt'] = {'.sv': 'timestamp'};
+    if (!await _putRewards(next)) {
+      return _msg('Coin Exchange Rules ne reject kiya. Refresh karke try karein.');
+    }
+    _msg('$rupees rupees Bonus Wallet mein add hue. Main Wallet unchanged hai.');
+  }
+
+  Widget _referralCard() {
+    final code = _referralCode.isEmpty ? widget.uid : _referralCode;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('REFER & EARN', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+          const SizedBox(height: 5),
+          const Text('Friend ke first ₹20+ approved deposit par aapko ₹5 Main Wallet mein milenge.', style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: SelectableText('Your Code: $code', style: const TextStyle(fontWeight: FontWeight.bold))),
+            IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
+          ]),
+          Row(children: [
+            Expanded(child: Text('Successful referrals: $_referralCount', style: const TextStyle(color: Colors.white70, fontSize: 12))),
+            Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+          ]),
+          if (_referredBy.isNotEmpty) const Text('Referral linked to your account.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _rewardsCard() {
+    final coins = _num(_rewards['coins']);
+    final bonus = _num(_rewards['bonusWallet']);
+    final watched = _num(_rewards['watchCount']);
+    final streak = _num(_rewards['streakDay']);
+    final unityConfigMissing = _unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty;
+    final rewardDayMatches = _rewards['rewardDayKey'] == _currentRewardDayKey();
+    final cooldown = _rewardCooldownUntil.difference(_clock);
+    final cooldownActive = cooldown.inSeconds > 0;
+    final streakDone = rewardDayMatches && _rewards['streakClaimed'] == true;
+    final dailyDone = rewardDayMatches && _rewards['dailyBonusClaimed'] == true;
+    final displayWatched = rewardDayMatches ? watched : 0;
+    final cooldownLabel = cooldownActive
+        ? '${cooldown.inHours.toString().padLeft(2, '0')}:${(cooldown.inMinutes % 60).toString().padLeft(2, '0')}:${(cooldown.inSeconds % 60).toString().padLeft(2, '0')}'
+        : '';
+    // 20 Watch + 1 Streak + 1 Daily Bonus; reset at 05:00 IST.
+    final watchBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || (rewardDayMatches && watched >= 20);
+    final streakBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || streakDone;
+    final dailyBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || dailyDone;
+    String rewardReason(String kind) {
+      if (unityConfigMissing) return 'Unity Ads Game ID / Rewarded Placement ID Admin Settings mein set karein.';
+      if (_rewardAdBusy) return 'Unity rewarded ad chal raha hai...';
+      if (cooldownActive) return 'Agla rewarded ad ${cooldown.inSeconds + 1} seconds baad available hoga.';
+      if (kind == 'watch' && rewardDayMatches && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset 5:00 AM IST par hoga.';
+      if (kind == 'streak' && streakDone) return 'Daily Streak claimed. Reset 5:00 AM IST par hoga.';
+      if (kind == 'daily' && dailyDone) return 'Daily Bonus claimed. Reset 5:00 AM IST par hoga.';
+      return '';
+    }
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(child: Text('BONUS REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
+            Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold)),
+          ]),
+          const SizedBox(height: 4),
+          Text('Bonus Wallet: ₹$bonus  •  Non-withdrawable', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
+          const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            OutlinedButton(
+              onPressed: watchBlocked ? null : () => _startUnityReward('watch'),
+              child: Text('Watch & Earn ($displayWatched/20)'),
+            ),
+            OutlinedButton(
+              onPressed: streakBlocked ? null : () => _startUnityReward('streak'),
+              child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
+            ),
+            OutlinedButton(
+              onPressed: dailyBlocked ? null : () => _startUnityReward('daily'),
+              child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
+            ),
+            ElevatedButton(
+              onPressed: coins >= 100 ? _exchangeCoins : null,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+              child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
+            ),
+          ]),
+          if (unityConfigMissing || _rewardAdBusy || cooldownActive)
+            Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber))
+          else ...[
+            if (watchBlocked) Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+            if (streakBlocked) Text(rewardReason('streak'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+            if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+          ],
+          if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          const Text('20 Watch & Earn + 1 Daily Streak + 1 Daily Bonus = max 22 rewarded ads/day. Reset daily 5:00 AM IST par hota hai. Unity Ads duration Unity decide karta hai; har ad ke baad 5-second cooldown hai. Firebase Spark client-only setup ad views/reward claims ko fully tamper-proof nahi bana sakta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+        ]),
+      ),
+    );
+  }
+
+  void _deposit() {
+        final amtC = TextEditingController(text: '50');
+
+    final utrC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) {
+                 final amt = int.tryParse(amtC.text.trim()) ?? 0;
+
+          final autoQr = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${Uri.encodeComponent('upi://pay?pa=$_upiId&pn=SK%20ESPORTS&am=$amt&cu=INR')}';
+          final img = _qrUrl.trim().isNotEmpty ? _qrUrl.trim() : autoQr;
+          return AlertDialog(
+            title: const Text('Add Money (Scan & Pay)', style: TextStyle(fontSize: 15)),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+
+                                TextField(
+                controller: amtC,
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setS(() {}),
+                decoration: const InputDecoration(labelText: 'Enter Amount (₹)', border: OutlineInputBorder()),
+              ),
+
+                const SizedBox(height: 8),
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(6),
+                  child: Image.network(
+                    img,
+                    height: 150,
+                    width: 150,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.qr_code_2, size: 120, color: Colors.black),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: _upiId));
+                    _msg('UPI Copied!');
+                  },
+                  child: Text(
+                    'UPI: $_upiId (Tap Copy)',
+                    style: const TextStyle(color: Color(0xFF00E676), fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(controller: utrC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '12-Digit UTR Number', border: OutlineInputBorder())),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+                onPressed: () async {
+                                              if (amt < 10) {
+                          return _msg('Kam se kam ₹10 dalein!');
+                                              }
+
+                                          final utr = utrC.text.trim();
+                        if (!RegExp(r'^\d{12}$').hasMatch(utr)) {
+                          return _msg('Sahi 12-Digit UTR dalein!');
+                        }
+                        final depositId = DateTime.now().microsecondsSinceEpoch.toString();
+                        final now = DateTime.now().millisecondsSinceEpoch;
+                        final patch = <String, dynamic>{
+                          'usedUtrs/$utr': {'uid': widget.uid, 'depositId': depositId, 'createdAt': now},
+                          'deposits/$depositId': {
+                            'uid': widget.uid,
+                            'ign': _ign,
+                            'amt': amt,
+                            'utr': utr,
+                            'status': 'PENDING',
+                            'createdAt': now,
+                          },
+                        };
+                        Navigator.pop(ctx);
+                        final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
+                        if (res.statusCode < 200 || res.statusCode >= 300) {
+                          return _msg('UTR submit nahi hua. Ho sakta hai ye UTR pehle use ho chuka ho.');
+                        }
+                        _msg('UTR Submitted! Admin verify karte hi wallet mein add hoga.');
+                },
+                child: const Text('Submit UTR', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _withdraw() {
+    final upiC = TextEditingController(), amtC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Withdraw Winnings', style: TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: upiC, decoration: const InputDecoration(labelText: 'Your UPI ID', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (Min ₹50)', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              final v = _num(amtC.text.trim());
+              if (!upiC.text.contains('@') || (v - 50).isNegative || (_wallet - v).isNegative) {
+                return _msg('Valid UPI aur balance check karein!');
+              }
+              final requestId = DateTime.now().microsecondsSinceEpoch.toString();
+              Navigator.pop(ctx);
+              final res = await http.put(
+                Uri.parse('$kDbUrl/withdrawals/$requestId.json?auth=${widget.token}'),
+                body: jsonEncode({
+                  'uid': widget.uid,
+                  'ign': _ign,
+                  'upi': upiC.text.trim(),
+                  'amt': v,
+                  'status': 'PENDING',
+                  'createdAt': DateTime.now().millisecondsSinceEpoch,
+                }),
+              );
+              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Withdrawal request save nahi hui.');
+              _msg('Withdrawal request bhej di. Wallet deduction Super Admin approval par hoga.');
+            },
+            child: const Text('Withdraw', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _editRoom(Map m) {
+    final idC = TextEditingController(text: '${m['rId']}'),
+        passC = TextEditingController(text: '${m['rPass']}');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Room ID & Pass', style: TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: idC, decoration: const InputDecoration(labelText: 'Room ID', border: OutlineInputBorder())),
+          const SizedBox(height: 8),
+          TextField(controller: passC, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              setState(() {
+                m['rId'] = idC.text.trim();
+                m['rPass'] = passC.text.trim();
+              });
+              Navigator.pop(ctx);
+              await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'rId': m['rId'], 'rPass': m['rPass']}));
+              _msg('Room Updated!');
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+    void _addMatch() {
+    final tC = TextEditingController(),
+        mapC = TextEditingController(text: 'Erangel'),
+        modeC = TextEditingController(text: 'SOLO'),
+        feeC = TextEditingController(text: '30'),
+        killC = TextEditingController(text: '20'),
+        winC = TextEditingController(text: '175'),
+        startC = TextEditingController(text: _dateTimeInput(DateTime.now().add(const Duration(hours: 1)))),
+        roomC = TextEditingController(text: _dateTimeInput(DateTime.now().add(const Duration(minutes: 45))));
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create New Match', style: TextStyle(fontSize: 15)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: tC, decoration: const InputDecoration(labelText: 'Title')),
+            TextField(controller: mapC, decoration: const InputDecoration(labelText: 'Map (Erangel/Miramar/Vikendi/Livik)')),
+            TextField(controller: modeC, decoration: const InputDecoration(labelText: 'Mode (SOLO/SQUAD)')),
+            TextField(controller: startC, readOnly: true, onTap: () => _pickDateTime(startC), decoration: const InputDecoration(labelText: 'Match Date & Time', suffixIcon: Icon(Icons.calendar_month))),
+            const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Registration auto-close selected match date & time par hoga.', style: TextStyle(fontSize: 11, color: Colors.amber))),
+            TextField(controller: roomC, readOnly: true, onTap: () => _pickDateTime(roomC), decoration: const InputDecoration(labelText: 'Room ID Release Date & Time', suffixIcon: Icon(Icons.schedule))),
+            TextField(controller: feeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry Fee')),
+            TextField(controller: killC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per Kill')),
+            TextField(controller: winC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Chicken Dinner Prize')),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+            onPressed: () async {
+              if (tC.text.trim().isEmpty) return;
+              DateTime? parseTime(String v) => DateTime.tryParse(v.trim().replaceFirst(' ', 'T'));
+              final st = parseTime(startC.text), rm = parseTime(roomC.text);
+              if (st == null || rm == null) return _msg('Calendar se match date/time aur room release select karein.');
+              Navigator.pop(ctx);
+              final created = await http.post(
+                Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'),
+                body: jsonEncode({
+                  'title': tC.text.trim(),
+                  'map': mapC.text.trim(),
+                  'mode': modeC.text.trim().toUpperCase(),
+                  'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch}),
+                  'startAt': st.millisecondsSinceEpoch,
+                  'createdAt': DateTime.now().millisecondsSinceEpoch,
+                  'closeAt': st.millisecondsSinceEpoch,
+                  'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds,
+                  'hold': false,
+                  'status': 'OPEN',
+                  'fee': _num(feeC.text),
+                  'kill': _num(killC.text),
+                  'win': _num(winC.text),
+                  'slots': (mapC.text.trim().toLowerCase().contains('livik') ? 52 : 100) ~/ ((modeC.text.trim().toUpperCase().contains('SQUAD')) ? 4 : (modeC.text.trim().toUpperCase().contains('DUO') ? 2 : 1)),
+                              'joined': 0,
+            'rId': '15 min before match',
+            'rPass': '****',
+
+
+                }),
+              );
+              if (created.statusCode >= 200 && created.statusCode < 300) {
+                final key = (jsonDecode(created.body) as Map)['name']?.toString();
+                if (key != null) {
+                  final fresh = {'title': tC.text.trim(), 'collection': 0, 'prizeSent': 0, 'settled': false, 'status': 'OPEN', 'updatedAt': DateTime.now().millisecondsSinceEpoch};
+                  await http.put(Uri.parse('$kDbUrl/match_hisaab/$key.json?auth=${widget.token}'), body: jsonEncode(fresh));
+                }
+              }
+              _msg('Match Live!');
+              _sync();
+            },
+            child: const Text('Publish', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _addManualBalance(Map u) {
+    if (!isSuperAdmin) return _msg('Add Balance ka access sirf Super Admin ko hai.');
+    final amountC = TextEditingController();
+    final reasonC = TextEditingController(text: 'Manual Bonus / Refund');
+    final uid = (u['uid'] ?? '').toString();
+    if (uid.isEmpty) return _msg('Player UID nahi mila.');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Add Balance • ${u['ign'] ?? 'Player'}', style: const TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Current balance: ₹${_num(u['wallet'])}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+          TextField(controller: amountC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Add Amount (₹)')),
+          TextField(controller: reasonC, decoration: const InputDecoration(labelText: 'Reason (Bonus / Refund / Test)')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+            onPressed: () async {
+              if (!isSuperAdmin) return _msg('Add Balance ka access sirf Super Admin ko hai.');
+              final amount = _num(amountC.text.trim());
+              final reason = reasonC.text.trim();
+              if (amount <= 0 || reason.isEmpty) return _msg('Valid amount aur reason dalein.');
+              Navigator.pop(ctx);
+              try {
+                final latest = await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'));
+                if (latest.statusCode != 200 || latest.body == 'null') throw Exception('Player account nahi mila.');
+                final player = jsonDecode(latest.body) as Map;
+                final oldBalance = _num(player['wallet']);
+                final newBalance = oldBalance + amount;
+                await _saveTxn(uid, newBalance, reason, 'Manual credit by SK ESPORTS Admin', amount, 'CREDITED');
+                _msg('₹$amount ${u['ign'] ?? 'Player'} ke wallet mein add ho gaye.');
+                await _sync();
+              } catch (e) {
+                _msg(e.toString().replaceAll('Exception: ', ''));
+              }
+            },
+            child: const Text('Add Balance', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+  void _sendPrize(Map u, {Map? match}) {
+    if (!isSuperAdmin) return _msg('Prize bhejne ka access sirf Super Admin ko hai.');
+    final amtC = TextEditingController(), noteC = TextEditingController(text: 'Winning Prize');
+    final uid = (u['uid'] ?? '').toString().trim();
+    if (uid.isEmpty) return _msg('Recipient UID nahi mila.');
+    final eligible = match != null
+        ? <Map>[if (match['players'] is Map && (match['players'] as Map).containsKey(uid)) match]
+        : _matches.where((m) => m is Map && m['players'] is Map && (m['players'] as Map).containsKey(uid)).cast<Map>().toList();
+    if (eligible.isEmpty) return _msg('Is exact player/team UID ka selected match roster mein nahi mila.');
+    String selectedId = eligible.first['id'].toString();
+    final boundMatchId = match?['id']?.toString();
+    final roster = match != null && match['players'] is Map ? (match['players'] as Map)[uid] : null;
+    final rosterIgn = roster is Map ? (roster['ign'] ?? u['ign'] ?? 'Player').toString() : (u['ign'] ?? 'Player').toString();
+    final slot = roster is Map ? _num(roster['slotNumber']) : 0;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
+        title: Text('Send Prize to $rosterIgn${slot > 0 ? ' • Slot #$slot' : ''}', style: const TextStyle(fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          DropdownButtonFormField<String>(
+            value: selectedId,
+            decoration: const InputDecoration(labelText: 'Select Match'),
+            items: eligible.map((m) => DropdownMenuItem<String>(value: m['id'].toString(), child: Text((m['title'] ?? 'Match').toString(), overflow: TextOverflow.ellipsis))).toList(),
+            onChanged: boundMatchId != null ? null : (v) { if (v != null) setDialogState(() => selectedId = v); },
+          ),
+          Text('Recipient UID: $uid', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+          TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
+          TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Reason')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            onPressed: () async {
+              if (!isSuperAdmin) return _msg('Prize bhejne ka access sirf Super Admin ko hai.');
+              final add = _num(amtC.text);
+              if (add <= 0) return _msg('Valid prize amount dalein.');
+              final chosen = eligible.firstWhere((m) => m['id'].toString() == selectedId);
+              if (boundMatchId != null && chosen['id'].toString() != boundMatchId) return _msg('Selected match binding mismatch. Dobara Players list kholein.');
+              final selectedRoster = chosen['players'] is Map ? (chosen['players'] as Map)[uid] : null;
+              if (selectedRoster is! Map) return _msg('Is match mein ye exact UID ab joined nahi hai.');
+              Navigator.pop(ctx);
+              try {
+                final latest = await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'));
+                if (latest.statusCode != 200 || latest.body == 'null') throw Exception('Selected recipient account nahi mila.');
+                final latestUser = jsonDecode(latest.body) as Map;
+                final bal = _num(latestUser['wallet']) + add;
+                final exactIgn = (selectedRoster['ign'] ?? latestUser['ign'] ?? 'Player').toString();
+                await _saveTxn(uid, bal, noteC.text.trim(), 'SK ESPORTS Admin • ${chosen['title']} • $exactIgn', add, 'CREDITED');
+                await _addMatchPrize(selectedId, chosen['title'].toString(), add);
+                _msg('₹$add prize $exactIgn (UID matched) ke wallet mein credit ho gaya.');
+                await _sync();
+              } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
+            },
+            child: const Text('Send', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      )),
+    );
+  }
+  void _showPlayers(Map m) {
+    final pMap = m['players'] is Map ? m['players'] as Map : {};
+    final originalEntries = pMap.entries.toList();
+    final originalPositions = <String, int>{for (var i = 0; i < originalEntries.length; i++) originalEntries[i].key.toString(): i + 1};
+    final list = originalEntries..sort((a, b) {
+      final ap = a.value is Map ? _num((a.value as Map)['slotNumber']) : 0;
+      final bp = b.value is Map ? _num((b.value as Map)['slotNumber']) : 0;
+      final aSlot = ap > 0 ? ap : (originalPositions[a.key.toString()] ?? 0);
+      final bSlot = bp > 0 ? bp : (originalPositions[b.key.toString()] ?? 0);
+      return aSlot.compareTo(bSlot);
+    });
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Players (${list.length}/${m['slots']})', style: const TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: list.isEmpty
+              ? const Text('Abhi kisi ne join nahi kiya hai.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final uid = list[i].key.toString();
+                    final p = list[i].value is Map ? list[i].value as Map : {};
+                    final u = _users.firstWhere(
+                      (x) => x['uid'] == uid,
+                      orElse: () => {'uid': uid, 'ign': p['ign'] ?? 'Player', 'wallet': 0},
+                    );
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('Slot #${_num(p['slotNumber']) > 0 ? p['slotNumber'] : i + 1} • ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Text(
+                        p['members'] is List
+                          ? (p['members'] as List).asMap().entries.map((e) => '${e.key + 1}. ${(e.value as Map)['ign'] ?? '-'} • ID: ${(e.value as Map)['bgmiId'] ?? '-'}').join('\n')
+                          : 'ID: ${p['bgmiId'] ?? '-'}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: isSuperAdmin ? ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _sendPrize({'uid': uid, 'ign': p['ign'] ?? u['ign'] ?? 'Player'}, match: m);
+                        },
+                        child: const Text('Send Prize', style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ) : null,
+                    );
+                  },
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  void _showPaymentSettingsDialog() {
+    if (!isSuperAdmin) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('PAYMENT METHOD / UPI DETAILS', style: TextStyle(color: Color(0xFFFF9800), fontSize: 16)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: _upiC, decoration: const InputDecoration(labelText: 'Your UPI ID (Auto QR)', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
+            TextField(controller: _qrC, decoration: const InputDecoration(labelText: 'Custom QR Image URL (Optional)', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), minimumSize: const Size.fromHeight(42)),
+                onPressed: () async {
+                  _upiId = _upiC.text.trim();
+                  _qrUrl = _qrC.text.trim();
+                  final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'upiId': _upiId, 'qrUrl': _qrUrl}));
+                  if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Payment details save nahi hue.');
+                  _msg('New Payment QR Live!');
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) setState(() {});
+                },
+                child: const Text('Update QR Live', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ]),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  void _openRewardsPage() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => StatefulBuilder(
+      builder: (pageContext, setPageState) => Scaffold(
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF161B22),
+          title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh rewards and wallet data',
+              icon: const Icon(Icons.refresh, color: Color(0xFFFF9800)),
+              onPressed: () async {
+                await _sync();
+                if (!mounted) return;
+                setPageState(() {});
+                _msg('Rewards, coins, wallet aur referral data refresh ho gaya.');
+              },
+            ),
+          ],
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
+            _rewardsCard(),
+            const SizedBox(height: 10),
+            _referralCard(),
+          ],
+        ),
+      ),
+    )));
+  }
+
+  Widget build(BuildContext context) {
+    final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
+    final showAutoAd = _autoBannerAdEnabled && _adsterraBannerCode.trim().isNotEmpty;
+    final showBanner = showPromo;
+    final showQuickActions = isAdmin;
+    final leadingItems = (showBanner ? 1 : 0) + (showQuickActions ? 1 : 0);
+    final pages = [
+      Column(children: [
+        Expanded(child: ListView.builder(
+        padding: const EdgeInsets.all(12),
+        itemCount: _matches.length + leadingItems,
+        itemBuilder: (_, i) {
+          if (showPromo && i == 0) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () async {
+                  final u = Uri.tryParse(_promoClickUrl);
+                  if (u != null && (u.scheme == 'https' || u.scheme == 'http')) {
+                    await launchUrl(u, mode: LaunchMode.externalApplication);
+                  }
+                },
+                child: Image.network(_promoImageUrl, height: 110, width: double.infinity, fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Padding(
+                    padding: EdgeInsets.all(16), child: Text('SK ESPORTS PROMO'),
+                  ),
+                ),
+              ),
+            );
+          }
+          final quickIndex = showPromo ? 1 : 0;
+          if (showQuickActions && i == quickIndex) return _adminQuickActions();
+          final m = _matches[i - leadingItems],
+              joined = m['isJoined'] == true,
+              isFull = _matchPlayerCount(m) >= _num(m['slots']),
+              closed = _matchClosed(m),
+              roomReady = _roomAvailable(m);
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Expanded(
+                    child: Text(
+                      '${m['title']} (${m['map']} • ${m['mode']})',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                  ),
+                  if (isAdmin)
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.redAccent),
+                      onPressed: () async {
+                        await http.delete(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'));
+                        _sync();
+                      },
+                    ),
+                ]),
+                Text(
+                  'Time: ${_smartMatchTime(m)} | Entry: ₹${m['fee']} | Kill: ₹${m['kill']} | Win: ₹${m['win']}',
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+                if (_isMatchCompleted(m)) ...[
+                  const SizedBox(height: 5),
+                  Row(children: [
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(color: const Color(0xFF00E676).withOpacity(.16), borderRadius: BorderRadius.circular(8)), child: const Text('COMPLETED', style: TextStyle(color: Color(0xFF00E676), fontSize: 10, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: 8),
+                    Text('${_matchPlayerCount(m)}/${_num(m['slots'])} Players', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                  ]),
+                ],
+                Text('Join: ${_isMatchCompleted(m) ? 'COMPLETED' : (closed ? 'CLOSED' : 'OPEN')} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : '15 min before match')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
+                if (joined || isAdmin) ...[
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    ElevatedButton(
+                      onPressed: () => _showRoomAfterAd(m),
+                      child: const Text('View Room ID / Pass'),
+                    ),
+                    if (isAdmin) ...[
+                      IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
+                      IconButton(icon: const Icon(Icons.schedule, color: Colors.lightBlueAccent), onPressed: () => _editMatchTiming(m)),
+                      IconButton(icon: Icon(m['hold'] == true ? Icons.play_arrow : Icons.pause, color: Colors.amber), onPressed: () => _toggleMatchHold(m)),
+                    ],
+                  ]),
+                ],
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+
+                                      if (isAdmin) ...[
+                        OutlinedButton(
+                          onPressed: () => _showPlayers(m),
+                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
+                          child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                        ),
+                        const SizedBox(width: 6),
+                        if (!_isMatchCompleted(m)) OutlinedButton(
+                          onPressed: () => _markMatchCompleted(m),
+                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), minimumSize: Size.zero, foregroundColor: const Color(0xFF00E676)),
+                          child: const Text('Complete', style: TextStyle(fontSize: 11)),
+                        ),
+                        const SizedBox(width: 6),
+                        if (isSuperAdmin) OutlinedButton.icon(
+                          onPressed: () => _showMatchHisaab(m),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF00E676),
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                            minimumSize: Size.zero,
+                            side: const BorderSide(color: Color(0xFF00E676)),
+                          ),
+                          icon: const Icon(Icons.account_balance_wallet, size: 14),
+                          label: const Text('₹ Hisaab', style: TextStyle(fontSize: 11)),
+                        ),
+                      ],
+                      const Spacer(),
+                      Text('${_matchPlayerCount(m)}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                  ElevatedButton( 
+
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
+                    ),
+                    onPressed: (joined || isFull || closed || isSuperAdmin) ? null : () => _startJoinAd(m),
+                    child: Text(
+                      joined ? 'JOINED ✓${_slotNumberFor(m, widget.uid) > 0 ? '  •  SLOT #${_slotNumberFor(m, widget.uid)}' : ''}' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isSuperAdmin ? 'SUPER ADMIN' : 'Join ₹${m['fee']}'))),
+                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
+          );
+        },
+        )),
+        if (showAutoAd)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+            child: Card(
+              margin: EdgeInsets.zero,
+              clipBehavior: Clip.antiAlias,
+              child: Center(
+                child: SizedBox(width: 320, height: 50,
+                  child: AdsterraBanner(code: _adsterraBannerCode)),
+              ),
+            ),
+          ),
+      ]),
+      Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          Card(
+            child: ListTile(
+              title: const Text('Wallet Balance'),
+              trailing: Text(
+                '₹$_wallet',
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00E676)),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 12)),
+                  onPressed: _deposit,
+                  child: const Text('Add Money', maxLines: 1, style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
+                ),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _withdraw,
+                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 12)),
+                  child: const Text('Withdraw', maxLines: 1, style: TextStyle(fontSize: 12)),
+                ),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: isSuperAdmin ? _showPaymentSettingsDialog : _deposit,
+                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8), foregroundColor: const Color(0xFFFF9800), side: const BorderSide(color: Color(0xFFFF9800))),
+                  child: const Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.qr_code_2, size: 17),
+                    Text('UPI / QR', maxLines: 1, style: TextStyle(fontSize: 9)),
+                  ]),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 12, bottom: 6), child: Text('TRANSACTION HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
+          Expanded(
+            child: _txns.isEmpty
+                ? const Center(child: Text('Abhi koi wallet transaction nahi hai.'))
+                : ListView.builder(
+                    itemCount: _txns.length,
+                    itemBuilder: (_, i) => ListTile(
+                      leading: const Icon(Icons.receipt_long, color: Color(0xFFFF9800)),
+                      title: Text('${_txns[i]['title'] ?? 'Wallet Transaction'}'),
+                      subtitle: Text('${_txns[i]['sub'] ?? ''} • ${_txns[i]['status'] ?? ''}\n${_formatHistoryDateTime(_txns[i])}'),
+                      trailing: Text('₹${_txns[i]['amt'] ?? 0}'),
+                    ),
+                  ),
+          ),
+        ]),
+      ),
+      ListView(padding: const EdgeInsets.all(16), children: [
+        Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
+        Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('RULES:\n$_rulesText'))),
+        ..._aboutLinks.map((link) => Padding(padding: const EdgeInsets.only(bottom: 7), child: OutlinedButton.icon(onPressed: () async { final uri = Uri.tryParse(link['url'].toString()); if (uri != null && !await launchUrl(uri, mode: LaunchMode.externalApplication)) { await Clipboard.setData(ClipboardData(text: link['url'].toString())); _msg('Link copied!'); } }, icon: const Icon(Icons.open_in_new), label: Text(link['label'].toString())))),
+                OutlinedButton(
+          onPressed: () async {
+            await (await SharedPreferences.getInstance()).clear();
+            if (!context.mounted) return;
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
+          },
+          child: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+        ),
+
+      ]),
+      _chatPage(),
+      if (isAdmin)
+        ListView(padding: const EdgeInsets.all(14), children: [
+          if (isSuperAdmin) ...[
+
+          ],
+          if (isSuperAdmin) Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('ADSTERRA & PROMO SETTINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+                const SizedBox(height: 8),
+                TextField(controller: _joinAdUrlController, decoration: const InputDecoration(labelText: 'Join Ad Direct Link (10 sec)')),
+                const SizedBox(height: 8),
+                TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Room Ad Direct Link (5 sec)')),
+                const SizedBox(height: 8),
+                TextField(controller: _unityGameIdController, decoration: const InputDecoration(labelText: 'Unity Ads Game ID (Android)')),
+                const SizedBox(height: 8),
+                TextField(controller: _unityPlacementIdController, decoration: const InputDecoration(labelText: 'Unity Rewarded Placement ID')),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Unity Ads Test Mode'),
+                  subtitle: const Text('Testing ke dauran ON rakhein; live ads ke liye Unity Dashboard setup ke baad OFF karein.'),
+                  value: _unityTestMode,
+                  onChanged: (v) => setState(() => _unityTestMode = v),
+                ),
+                TextField(controller: _promoImageUrlController, decoration: const InputDecoration(labelText: 'Promo Image URL')),
+                const SizedBox(height: 8),
+                TextField(controller: _promoClickUrlController, decoration: const InputDecoration(labelText: 'Promo Click URL')),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _adsterraBannerCodeController,
+                  minLines: 4,
+                  maxLines: 8,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    labelText: 'Adsterra Banner Code / Key (320×50)',
+                    hintText: 'Paste the complete Adsterra HTML / JavaScript banner code',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Auto Banner Ad ON / OFF'),
+                  subtitle: const Text('Personal promo ON hone par automatic banner hide rahega.'),
+                  value: _autoBannerAdEnabled,
+                  onChanged: (v) => setState(() => _autoBannerAdEnabled = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Top Promo Banner ON / OFF'),
+                  value: _promoEnabled,
+                  onChanged: (v) => setState(() => _promoEnabled = v),
+                ),
+                ElevatedButton(
+                  onPressed: _saveAdAndPromoConfig,
+                  child: const Text('Save Ad & Promo Settings'),
+                ),
+                const Text('Unity rewarded ads Game ID + Rewarded Placement ID se chalte hain. Join ad 10 seconds rahega; Room ID / Pass par ad nahi hai. Custom promo top par, normal network banner bottom par dikhega.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+              ]),
+            ),
+          ),
+          if (isSuperAdmin) ...[
+          Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('ABOUT LINKS & RULES EDITOR', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)), const SizedBox(height: 6), const Text('Har line: Button Name | https://link', style: TextStyle(fontSize: 11, color: Colors.grey)), TextField(controller: _aboutLinksC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Social / Support Links', border: OutlineInputBorder())), const SizedBox(height: 8), TextField(controller: _rulesC, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Rules (BGMI Level 30+ etc.)', border: OutlineInputBorder())), ElevatedButton(onPressed: _saveAboutRules, child: const Text('Save About & Rules'))]))),
+          ],
+          const SizedBox(height: 12),
+          const SizedBox(height: 12),
+          if (isSuperAdmin) ...[
+          TextButton.icon(
+            onPressed: _showHistory,
+            icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
+            label: const Text('All Players History', style: TextStyle(color: Color(0xFFFF9800))),
+          ),
+          ],
+
+    ]),
+]; 
+    final navPages = isAdmin
+        ? [pages[0], pages[1], pages[3], pages[4], pages[2]]
+        : [pages[0], pages[1], pages[3], pages[2]];
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('SK ESPORTS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _sync),
+          Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: TextButton.icon(
+              onPressed: _openRewardsPage,
+              icon: const Icon(Icons.card_giftcard, color: Color(0xFFFF9800), size: 18),
+              label: const Text('Earn', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Text(
+                '₹$_wallet',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 16),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: _loading ? const Center(child: CircularProgressIndicator()) : navPages[_tab],
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _tab,
+        selectedItemColor: const Color(0xFFFF9800),
+        onTap: (i) => setState(() => _tab = i),
+        items: [
+          const BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
+          const BottomNavigationBarItem(icon: Icon(Icons.wallet), label: 'Wallet'),
+          const BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
+          if (isAdmin) const BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
+          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+        ],
+      ),
+    );
+  }
+}).firstMatch(rawTime);
+    if (legacyMatch != null) {
+      final day = int.parse(legacyMatch.group(1)!);
+      final month = int.parse(legacyMatch.group(2)!);
+      final year = int.parse(legacyMatch.group(3)!);
+      final hour = int.parse(legacyMatch.group(4)!);
+      final minute = int.parse(legacyMatch.group(5)!);
+      return DateTime(year, month, day, hour, minute).millisecondsSinceEpoch;
+    }
     // Wallet transaction keys are generated from microsecondsSinceEpoch.
     final id = int.tryParse((entry['id'] ?? '').toString());
     if (id != null && id > 0) return id > 100000000000000 ? id ~/ 1000 : id;
@@ -2666,28 +4308,32 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openRewardsPage() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh rewards and wallet data',
-            icon: const Icon(Icons.refresh, color: Color(0xFFFF9800)),
-            onPressed: () async {
-              await _sync();
-              if (mounted) _msg('Rewards, coins, wallet aur referral data refresh ho gaya.');
-            },
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(14),
-        children: [
-          _rewardsCard(),
-          const SizedBox(height: 10),
-          _referralCard(),
-        ],
+    Navigator.push(context, MaterialPageRoute(builder: (_) => StatefulBuilder(
+      builder: (pageContext, setPageState) => Scaffold(
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF161B22),
+          title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh rewards and wallet data',
+              icon: const Icon(Icons.refresh, color: Color(0xFFFF9800)),
+              onPressed: () async {
+                await _sync();
+                if (!mounted) return;
+                setPageState(() {});
+                _msg('Rewards, coins, wallet aur referral data refresh ho gaya.');
+              },
+            ),
+          ],
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
+            _rewardsCard(),
+            const SizedBox(height: 10),
+            _referralCard(),
+          ],
+        ),
       ),
     )));
   }
