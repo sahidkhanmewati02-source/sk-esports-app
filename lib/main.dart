@@ -980,7 +980,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Future _saveTxn(String uid, int bal, String title, String sub, int amt, String status) async {
     final now = DateTime.now();
     final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final t = {'title': title, 'sub': '$sub • $dt', 'amt': amt, 'status': status, 'time': dt};
+    final t = {
+      'title': title,
+      'sub': '$sub • $dt',
+      'amt': amt,
+      'status': status,
+      'time': dt,
+      'createdAt': now.millisecondsSinceEpoch,
+    };
     final txnId = now.microsecondsSinceEpoch.toString();
     final patch = <String, dynamic>{
       'users/$uid/wallet': bal,
@@ -1391,13 +1398,29 @@ class _HomeScreenState extends State<HomeScreen> {
     return 0;
   }
 
+  String _formatHistoryDateTime(Map entry) {
+    final millis = _historyTimestamp(entry);
+    if (millis <= 0) return 'Date/time unavailable';
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year.toString().padLeft(4, '0');
+    final hour = dt.hour.toString().padLeft(2, '0');
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year $hour:$minute';
+  }
+
   void _showHistory([Map? player]) {
     final list = [];
     final target = player == null ? _users : [player];
     for (final u in target) {
       if (u['txns'] is Map) {
-        (u['txns'] as Map).forEach((_, v) {
-          if (v is Map) list.add({...v, 'ign': u['ign'] ?? 'Player'});
+        (u['txns'] as Map).forEach((txnKey, v) {
+          if (v is Map) list.add({
+            ...Map<String, dynamic>.from(v),
+            'id': txnKey.toString(),
+            'ign': u['ign'] ?? 'Player',
+          });
         });
       }
     }
@@ -1418,7 +1441,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     return ListTile(
                       dense: true,
                       title: Text('${player == null ? '${t['ign']} • ' : ''}${t['title']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      subtitle: Text('${t['sub'] ?? ''} • ${t['status'] ?? ''}', style: const TextStyle(fontSize: 11)),
+                      subtitle: Text(
+                        '${t['sub'] ?? ''} • ${t['status'] ?? ''}\n${_formatHistoryDateTime(t)}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
                       trailing: Text('₹${t['amt']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
                     );
                   },
@@ -2536,6 +2562,16 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
         title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh rewards and wallet data',
+            icon: const Icon(Icons.refresh, color: Color(0xFFFF9800)),
+            onPressed: () async {
+              await _sync();
+              if (mounted) _msg('Rewards, coins, wallet aur referral data refresh ho gaya.');
+            },
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(14),
