@@ -14,6 +14,7 @@ dependencies:
   shared_preferences: ^2.3.2
   url_launcher: any
   webview_flutter: ^4.10.0
+  unity_ads_plugin: ^0.6.0
 
 dev_dependencies:
   flutter_test:
