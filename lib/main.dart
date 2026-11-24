@@ -533,8 +533,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     final joinedCount = _num(match['joined']);
-    final joinedFallback = rosterCount == 0 ? joinedCount * fee : rosterTotal;
-    final calculated = joinedFallback;
+    final missingRosterSlots = joinedCount > rosterCount ? joinedCount - rosterCount : 0;
+    final calculated = rosterTotal + missingRosterSlots * fee;
     final saved = _num(hisaab['collection']);
     return calculated > saved ? calculated : saved;
   }
@@ -601,7 +601,7 @@ class _HomeScreenState extends State<HomeScreen> {
           await _ensureRewards();
         } else if (!_rewards.containsKey('discountsUsed') || !_rewards.containsKey('discountMatchId') || !_rewards.containsKey('discountAmount')) {
           final migrated = Map<String, dynamic>.from(_rewards);
-          migrated['discountsUsed'] = migrated['discountsUsed'] is Map ? migrated['discountsUsed'] : <String, dynamic>{};
+          migrated['discountsUsed'] = migrated['discountsUsed'] is Map ? migrated['discountsUsed'] : <String, dynamic>{'_init': false};
           migrated['discountMatchId'] = migrated['discountMatchId'] ?? '';
           migrated['discountAmount'] = migrated['discountAmount'] ?? 0;
           migrated['updatedAt'] = {'.sv': 'timestamp'};
@@ -1351,7 +1351,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AdViewerDialog(title: title, url: trimmedUrl, seconds: seconds, onContinue: onContinue),
+      builder: (_) => AdViewerDialog(title: title, url: uri.toString(), seconds: seconds, onContinue: onContinue),
     );
   }
 
@@ -1637,9 +1637,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void _join(Map m) {
     final teamSize = _teamSize(m);
     final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
+    final previouslyDiscounted = _rewards['discountsUsed'] is Map && (_rewards['discountsUsed'] as Map)[m['id'].toString()] == true;
     final nameControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 ? _ign : ''));
     final idControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 && _bgmiId != 'Not Set' ? _bgmiId : ''));
-    var useBonus = _num(_rewards['bonusWallet']) > 0;
+    var useBonus = _num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted;
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -1665,13 +1666,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     TextField(controller: idControllers[i], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: InputDecoration(labelText: 'BGMI ID • ${i + 1}', border: const OutlineInputBorder())),
                     const SizedBox(height: 10),
                   ],
-                  if (_num(_rewards['bonusWallet']) > 0) SwitchListTile(
+                  if (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted) SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: useBonus,
                     onChanged: (v) => setDialogState(() => useBonus = v),
                     title: const Text('Use Bonus Wallet discount', style: TextStyle(fontSize: 13)),
                     subtitle: Text('Max 10%: up to ₹$maxDiscount • Available ₹${_num(_rewards['bonusWallet'])}', style: const TextStyle(fontSize: 11)),
                   ),
+                  if (previouslyDiscounted) const Text('Is match mein aapka Bonus discount pehle use ho chuka hai.', style: TextStyle(fontSize: 11, color: Colors.amber)),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
@@ -1798,7 +1800,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'dailyBonusClaimed': false,
       'discountMatchId': '',
       'discountAmount': 0,
-      'discountsUsed': <String, dynamic>{},
+      'discountsUsed': <String, dynamic>{'_init': false},
       'updatedAt': {'.sv': 'timestamp'},
     };
     final res = await http.put(
