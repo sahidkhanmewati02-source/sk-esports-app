@@ -1,4 +1,5 @@
 name: Build SK ESPORTS APK
+# Rebuild after reward-history Dart syntax fix
 
 on:
   push:
