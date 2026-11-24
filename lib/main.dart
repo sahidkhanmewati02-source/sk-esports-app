@@ -1971,24 +1971,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _referralCard() {
-    final code = _referralCode.isEmpty ? widget.uid : _referralCode;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('REFER & EARN', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-          const SizedBox(height: 5),
-          const Text('Friend ke first ₹20+ approved deposit par aapko ₹5 Main Wallet mein milenge.', style: TextStyle(fontSize: 12)),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: SelectableText('Your Code: $code', style: const TextStyle(fontWeight: FontWeight.bold))),
-            IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
-          ]),
-          Row(children: [
-            Expanded(child: Text('Successful referrals: $_referralCount', style: const TextStyle(color: Colors.white70, fontSize: 12))),
-            Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
-          ]),
-          if (_referredBy.isNotEmpty) const Text('Referral linked to your account.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          const SizedBox(height: 10),
+          const Center(
+            child: Column(children: [
+              Icon(Icons.hourglass_top_rounded, color: Color(0xFFFF9800), size: 30),
+              SizedBox(height: 6),
+              Text('COMING SOON', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold, fontSize: 16)),
+              SizedBox(height: 4),
+              Text('Refer & Earn feature is temporarily unavailable.', style: TextStyle(color: Colors.white70, fontSize: 12), textAlign: TextAlign.center),
+            ]),
+          ),
         ]),
       ),
     );
@@ -2036,8 +2033,8 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
             OutlinedButton(
-              onPressed: watchBlocked ? null : () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
-              child: Text('Watch & Earn ($displayWatched/20)'),
+              onPressed: null,
+              child: const Text('Watch & Earn • Coming Soon'),
             ),
             OutlinedButton(
               onPressed: streakBlocked ? null : () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
@@ -2061,7 +2058,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
           ],
           if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
-          const Text('Reward Ads link Admin settings mein set hone ke baad claims available honge. Ad ko naturally load hone dein (aam taur par 15–30 sec); Close/Skip par destination ek baar open hoga. Fixed timer nahi hai. Firebase Spark client-only ad-view verify nahi karta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          const Text('Watch & Earn is temporarily unavailable and will return soon.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
     );
