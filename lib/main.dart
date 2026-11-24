@@ -1385,6 +1385,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final rawTime = (entry['time'] ?? '').toString();
     final parsedTime = DateTime.tryParse(rawTime);
     if (parsedTime != null) return parsedTime.millisecondsSinceEpoch;
+    // Wallet transaction keys are generated from microsecondsSinceEpoch.
+    final id = int.tryParse((entry['id'] ?? '').toString());
+    if (id != null && id > 0) return id > 100000000000000 ? id ~/ 1000 : id;
     return 0;
   }
 
