@@ -609,6 +609,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         if (d['referralCode'] == null) {
           await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(widget.uid));
+        }
+        final codeRes = await http.get(Uri.parse('$kDbUrl/referralCodes/${widget.uid}.json?auth=${widget.token}'));
+        if (codeRes.statusCode == 200 && codeRes.body == 'null') {
           await http.put(Uri.parse('$kDbUrl/referralCodes/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
         }
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
@@ -2164,7 +2167,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 body: jsonEncode({
                   'title': tC.text.trim(),
                   'map': mapC.text.trim(),
-                  'mode': modeC.text.trim(),
+                  'mode': modeC.text.trim().toUpperCase(),
                   'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch}),
                   'startAt': st.millisecondsSinceEpoch,
                   'createdAt': DateTime.now().millisecondsSinceEpoch,
