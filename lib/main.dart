@@ -1665,10 +1665,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void _join(Map m) {
     final teamSize = _teamSize(m);
     final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
-    final previouslyDiscounted = _rewards['discountsUsed'] is Map && (_rewards['discountsUsed'] as Map)[m['id'].toString()] == true;
+    final matchId = m['id'].toString();
+    final usedDiscounts = _rewards['discountsUsed'] is Map ? _rewards['discountsUsed'] as Map : <dynamic, dynamic>{};
+    final hasDiscountReservation = usedDiscounts[matchId] == true && _rewards['discountMatchId']?.toString() == matchId && _num(_rewards['discountAmount']) > 0;
+    final previouslyDiscounted = usedDiscounts[matchId] == true && !hasDiscountReservation;
     final nameControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 ? _ign : ''));
     final idControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 && _bgmiId != 'Not Set' ? _bgmiId : ''));
-    var useBonus = _num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted;
+    var useBonus = hasDiscountReservation || (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -1676,7 +1679,9 @@ class _HomeScreenState extends State<HomeScreen> {
           final fee = _num(m['fee']);
           final baseTotal = fee * teamSize;
           final maxDiscount = baseTotal ~/ 10;
-          final discount = useBonus ? math.min(_num(_rewards['bonusWallet']), maxDiscount).toInt() : 0;
+          final discount = hasDiscountReservation
+              ? _num(_rewards['discountAmount'])
+              : (useBonus ? math.min(_num(_rewards['bonusWallet']), maxDiscount).toInt() : 0);
           final payable = baseTotal - discount;
           return AlertDialog(
             title: Text('Join $mode • ${m['title']}', style: const TextStyle(fontSize: 15)),
@@ -1694,13 +1699,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     TextField(controller: idControllers[i], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: InputDecoration(labelText: 'BGMI ID • ${i + 1}', border: const OutlineInputBorder())),
                     const SizedBox(height: 10),
                   ],
-                  if (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted) SwitchListTile(
+                  if (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted && !hasDiscountReservation) SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: useBonus,
                     onChanged: (v) => setDialogState(() => useBonus = v),
                     title: const Text('Use Bonus Wallet discount', style: TextStyle(fontSize: 13)),
                     subtitle: Text('Max 10%: up to ₹$maxDiscount • Available ₹${_num(_rewards['bonusWallet'])}', style: const TextStyle(fontSize: 11)),
                   ),
+                  if (hasDiscountReservation) Text('Reserved Bonus discount ₹$discount is ready for this match.', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676))),
                   if (previouslyDiscounted) const Text('Is match mein aapka Bonus discount pehle use ho chuka hai.', style: TextStyle(fontSize: 11, color: Colors.amber)),
                   Container(
                     width: double.infinity,
@@ -1772,18 +1778,20 @@ class _HomeScreenState extends State<HomeScreen> {
                       'matches/${m['id']}/players/${widget.uid}': roster,
                       'matches/${m['id']}/joined': {'.sv': {'increment': 1}},
                     };
-                    if (discount > 0) {
+                    if (discount > 0 && !hasDiscountReservation) {
                       final nextRewards = Map<String, dynamic>.from(_rewards);
                       final used = nextRewards['discountsUsed'] is Map
                           ? Map<String, dynamic>.from(nextRewards['discountsUsed'])
-                          : <String, dynamic>{};
-                      used[m['id'].toString()] = true;
+                          : <String, dynamic>{'_init': false};
+                      used[matchId] = true;
                       nextRewards['discountsUsed'] = used;
-                      nextRewards['discountMatchId'] = m['id'].toString();
+                      nextRewards['discountMatchId'] = matchId;
                       nextRewards['discountAmount'] = discount;
                       nextRewards['bonusWallet'] = oldBonus - discount;
                       nextRewards['updatedAt'] = {'.sv': 'timestamp'};
-                      patch['users/${widget.uid}/rewards'] = nextRewards;
+                      if (!await _putRewards(nextRewards)) {
+                        return _msg('Bonus discount reserve nahi hua. Main Wallet se payment nahi li gayi.');
+                      }
                     }
                     final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
                     if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}). Wallet/slot update nahi hua.');
@@ -1791,7 +1799,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       _ign = leader['ign'].toString();
                       _bgmiId = leader['bgmiId'].toString();
                       _wallet = playerBalance;
-                      if (discount > 0) _rewards = Map<String, dynamic>.from(patch['users/${widget.uid}/rewards'] as Map);
                       _txns.insert(0, {'id': txnId, ...txn});
                       m['joined'] = _num(m['joined']) + 1;
                       m['isJoined'] = true;
