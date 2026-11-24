@@ -534,6 +534,26 @@ class _HomeScreenState extends State<HomeScreen> {
     return 0;
   }
 
+  int _slotNumberFor(Map m, String uid) {
+    final players = m['players'];
+    if (players is Map && players[uid] is Map) {
+      final saved = _num((players[uid] as Map)['slotNumber']);
+      if (saved > 0) return saved;
+    }
+    return 0;
+  }
+
+  int _nextSlotNumber(Map m) {
+    final players = m['players'];
+    var highest = 0;
+    if (players is Map) {
+      for (final value in players.values) {
+        if (value is Map) highest = math.max(highest, _num(value['slotNumber']));
+      }
+    }
+    return highest + 1;
+  }
+
   int _rosterCollection(Map match, Map hisaab) {
     final fee = _num(match['fee']);
     final players = match['players'];
@@ -1404,6 +1424,9 @@ class _HomeScreenState extends State<HomeScreen> {
       showDialog(context: context, builder: (ctx) => AlertDialog(
         title: const Text('Match Room Details'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_slotNumberFor(m, widget.uid) > 0)
+            Align(alignment: Alignment.centerLeft, child: Text('Your Slot Number: #${_slotNumberFor(m, widget.uid)}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))),
+          const SizedBox(height: 8),
           Row(children: [
             Expanded(child: SelectableText('Room ID: ${m['rId']}')),
             TextButton.icon(onPressed: () async {
@@ -1757,7 +1780,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   final txnId = now.microsecondsSinceEpoch.toString();
                   final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
                   final leader = members.first;
+                  final slotNumber = _nextSlotNumber(m);
                   final roster = <String, dynamic>{
+                    'slotNumber': slotNumber,
                     'ign': leader['ign'],
                     'bgmiId': leader['bgmiId'],
                     'members': members,
@@ -2287,21 +2312,29 @@ class _HomeScreenState extends State<HomeScreen> {
   void _sendPrize(Map u, {Map? match}) {
     if (!isSuperAdmin) return _msg('Prize bhejne ka access sirf Super Admin ko hai.');
     final amtC = TextEditingController(), noteC = TextEditingController(text: 'Winning Prize');
-    final uid = u['uid'].toString();
-    final eligible = match != null ? [match] : _matches.where((m) => m['players'] is Map && (m['players'] as Map).containsKey(uid)).toList();
-    if (eligible.isEmpty) return _msg('Is player ka joined match nahi mila; match roster se prize bhejein.');
+    final uid = (u['uid'] ?? '').toString().trim();
+    if (uid.isEmpty) return _msg('Recipient UID nahi mila.');
+    final eligible = match != null
+        ? <Map>[if (match['players'] is Map && (match['players'] as Map).containsKey(uid)) match]
+        : _matches.where((m) => m is Map && m['players'] is Map && (m['players'] as Map).containsKey(uid)).cast<Map>().toList();
+    if (eligible.isEmpty) return _msg('Is exact player/team UID ka selected match roster mein nahi mila.');
     String selectedId = eligible.first['id'].toString();
+    final boundMatchId = match?['id']?.toString();
+    final roster = match != null && match['players'] is Map ? (match['players'] as Map)[uid] : null;
+    final rosterIgn = roster is Map ? (roster['ign'] ?? u['ign'] ?? 'Player').toString() : (u['ign'] ?? 'Player').toString();
+    final slot = roster is Map ? _num(roster['slotNumber']) : 0;
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
-        title: Text('Send Prize to ${u['ign']}', style: const TextStyle(fontSize: 15)),
+        title: Text('Send Prize to $rosterIgn${slot > 0 ? ' • Slot #$slot' : ''}', style: const TextStyle(fontSize: 15)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<String>(
             value: selectedId,
             decoration: const InputDecoration(labelText: 'Select Match'),
             items: eligible.map((m) => DropdownMenuItem<String>(value: m['id'].toString(), child: Text((m['title'] ?? 'Match').toString(), overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) { if (v != null) setDialogState(() => selectedId = v); },
+            onChanged: boundMatchId != null ? null : (v) { if (v != null) setDialogState(() => selectedId = v); },
           ),
+          Text('Recipient UID: $uid', style: const TextStyle(fontSize: 10, color: Colors.grey)),
           TextField(controller: amtC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
           TextField(controller: noteC, decoration: const InputDecoration(labelText: 'Reason')),
         ]),
@@ -2314,12 +2347,19 @@ class _HomeScreenState extends State<HomeScreen> {
               final add = _num(amtC.text);
               if (add <= 0) return _msg('Valid prize amount dalein.');
               final chosen = eligible.firstWhere((m) => m['id'].toString() == selectedId);
+              if (boundMatchId != null && chosen['id'].toString() != boundMatchId) return _msg('Selected match binding mismatch. Dobara Players list kholein.');
+              final selectedRoster = chosen['players'] is Map ? (chosen['players'] as Map)[uid] : null;
+              if (selectedRoster is! Map) return _msg('Is match mein ye exact UID ab joined nahi hai.');
               Navigator.pop(ctx);
               try {
-                final bal = _num(u['wallet']) + add;
-                await _saveTxn(uid, bal, noteC.text.trim(), 'SK ESPORTS Admin • ${chosen['title']}', add, 'CREDITED');
+                final latest = await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'));
+                if (latest.statusCode != 200 || latest.body == 'null') throw Exception('Selected recipient account nahi mila.');
+                final latestUser = jsonDecode(latest.body) as Map;
+                final bal = _num(latestUser['wallet']) + add;
+                final exactIgn = (selectedRoster['ign'] ?? latestUser['ign'] ?? 'Player').toString();
+                await _saveTxn(uid, bal, noteC.text.trim(), 'SK ESPORTS Admin • ${chosen['title']} • $exactIgn', add, 'CREDITED');
                 await _addMatchPrize(selectedId, chosen['title'].toString(), add);
-                _msg('₹$add prize player wallet mein credit aur match hisaab mein add ho gaya.');
+                _msg('₹$add prize $exactIgn (UID matched) ke wallet mein credit ho gaya.');
                 await _sync();
               } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
             },
@@ -2331,7 +2371,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   void _showPlayers(Map m) {
     final pMap = m['players'] is Map ? m['players'] as Map : {};
-    final list = pMap.entries.toList();
+    final list = pMap.entries.toList()..sort((a, b) {
+      final ap = a.value is Map ? _num((a.value as Map)['slotNumber']) : 0;
+      final bp = b.value is Map ? _num((b.value as Map)['slotNumber']) : 0;
+      if (ap == 0 && bp == 0) return a.key.toString().compareTo(b.key.toString());
+      if (ap == 0) return 1;
+      if (bp == 0) return -1;
+      return ap.compareTo(bp);
+    });
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2352,7 +2399,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: Text('${i + 1}. ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      title: Text('#${_num(p['slotNumber']) > 0 ? p['slotNumber'] : i + 1} • ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       subtitle: Text(
                         p['members'] is List
                           ? (p['members'] as List).asMap().entries.map((e) => '${e.key + 1}. ${(e.value as Map)['ign'] ?? '-'} • ID: ${(e.value as Map)['bgmiId'] ?? '-'}').join('\n')
@@ -2363,7 +2410,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 10)),
                         onPressed: () {
                           Navigator.pop(ctx);
-                          _sendPrize(u, match: m);
+                          _sendPrize({'uid': uid, 'ign': p['ign'] ?? u['ign'] ?? 'Player'}, match: m);
                         },
                         child: const Text('Send Prize', style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
                       ) : null,
@@ -2492,6 +2539,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ]),
                 ],
                 Text('Join: ${_isMatchCompleted(m) ? 'COMPLETED' : (closed ? 'CLOSED' : 'OPEN')} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : '15 min before match')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
+                if (joined && _slotNumberFor(m, widget.uid) > 0)
+                  Padding(padding: const EdgeInsets.only(top: 4), child: Text('Your Slot: #${_slotNumberFor(m, widget.uid)}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 12))),
                 if (joined || isAdmin) ...[
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -2565,37 +2614,40 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          _rewardsCard(),
-          _referralCard(),
           Row(
             children: [
               Expanded(
                 child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 12)),
                   onPressed: _deposit,
-                  child: const Text('Add Money', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  child: const Text('Add Money', maxLines: 1, style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
-              if (isSuperAdmin) ...[
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 66,
-                  height: 42,
-                  child: OutlinedButton(
-                    onPressed: _showPaymentSettingsDialog,
-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4), foregroundColor: const Color(0xFFFF9800), side: const BorderSide(color: Color(0xFFFF9800))),
-                    child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(Icons.qr_code_2, size: 17),
-                      Text('UPI / QR', style: TextStyle(fontSize: 9)),
-                    ]),
-                  ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _withdraw,
+                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 12)),
+                  child: const Text('Withdraw', maxLines: 1, style: TextStyle(fontSize: 12)),
                 ),
-              ],
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: isSuperAdmin ? _showPaymentSettingsDialog : _deposit,
+                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8), foregroundColor: const Color(0xFFFF9800), side: const BorderSide(color: Color(0xFFFF9800))),
+                  child: const Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.qr_code_2, size: 17),
+                    Text('UPI / QR', maxLines: 1, style: TextStyle(fontSize: 9)),
+                  ]),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
+          _rewardsCard(),
+          _referralCard(),
+          const SizedBox(height: 4),
           Expanded(
             child: ListView.builder(
               itemCount: _txns.length,
