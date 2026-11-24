@@ -464,6 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0, _wallet = 0;
   Map<String, dynamic> _rewards = {};
   List _rewardHistory = [];
+  String _lastRewardsWriteError = 'No Firebase response captured';
   int _referralCount = 0, _referralEarnings = 0;
   String _referralCode = '', _referredBy = '';
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
@@ -2010,18 +2011,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<bool> _putRewards(Map<String, dynamic> value) async {
-    final res = await http.put(
-      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
-      body: jsonEncode(value),
-    );
-    if (res.statusCode < 200 || res.statusCode >= 300) return false;
     try {
-      final saved = jsonDecode(res.body);
-      if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
-      else _rewards = value;
-    } catch (_) { _rewards = value; }
-    if (mounted) setState(() {});
-    return true;
+      final res = await http.put(
+        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+        body: jsonEncode(value),
+      );
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        _lastRewardsWriteError = 'HTTP ${res.statusCode}: ${res.body}';
+        debugPrint('[SK ESPORTS] Rewards PUT rejected: ${_lastRewardsWriteError}');
+        return false;
+      }
+      try {
+        final saved = jsonDecode(res.body);
+        if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
+        else _rewards = value;
+      } catch (_) { _rewards = value; }
+      _lastRewardsWriteError = '';
+      if (mounted) setState(() {});
+      return true;
+    } catch (error, stackTrace) {
+      _lastRewardsWriteError = 'Network/client exception: $error';
+      debugPrint('[SK ESPORTS] Rewards PUT exception: ${_lastRewardsWriteError}\n$stackTrace');
+      return false;
+    }
   }
 
   String _currentRewardDayKey() {
@@ -2048,7 +2060,11 @@ class _HomeScreenState extends State<HomeScreen> {
     next['streakClaimed'] = false;
     next['dailyBonusClaimed'] = false;
     next['updatedAt'] = {'.sv': 'timestamp'};
-    return await _putRewards(next);
+    final saved = await _putRewards(next);
+    if (!saved) {
+      debugPrint('[SK ESPORTS] Daily reset failed. dayKey=$today dayStart=${next['rewardDayStart']} lastError=$_lastRewardsWriteError');
+    }
+    return saved;
   }
 
   Future<void> _startRewardCooldown() async {
@@ -2139,7 +2155,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _claimReward(String kind) async {
     if (_rewards.isEmpty) await _ensureRewards();
-    if (!await _resetRewardsForNewIstDay()) return _msg('Daily reset save nahi hua. Rewards Refresh karke dobara try karein.');
+    if (!await _resetRewardsForNewIstDay()) {
+      final detail = _lastRewardsWriteError.isEmpty ? 'Firebase ne write reject kiya, lekin response body empty thi.' : _lastRewardsWriteError;
+      debugPrint('[SK ESPORTS] Daily reset snackbar detail: $detail');
+      return _msg('Daily reset failed: $detail');
+    }
     final current = Map<String, dynamic>.from(_rewards);
     final next = Map<String, dynamic>.from(current);
     var reward = 0;
