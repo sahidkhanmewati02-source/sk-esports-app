@@ -1,0 +1,116 @@
+{
+  "rules": {
+    ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+    ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+    "users": {
+      ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
+      "$uid": {
+        ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || auth.uid === $uid)",
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && !data.exists() && newData.child('wallet').val() === 0 && !newData.child('role').exists()))",
+        "wallet": {
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && data.exists() && data.isNumber() && newData.isNumber() && newData.val() < data.val()))",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "role": {
+          ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+          ".validate": "newData.val() === 'coadmin' || newData.val() === 'player'"
+        },
+        "ign": {
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === $uid)"
+        },
+        "bgmiId": {
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === $uid)"
+        },
+        "txns": {
+          ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === $uid)",
+          "$txnId": {
+            ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && !data.exists()))"
+          }
+        },
+        "rewards": {
+          ".write": "auth != null && auth.uid === $uid && ((!data.exists() && newData.child('coins').val() === 0 && newData.child('bonusWallet').val() === 0 && newData.child('windowStart').val() === now && newData.child('watchCount').val() === 0 && newData.child('streakDay').val() === 0 && newData.child('streakClaimed').val() === false && newData.child('dailyBonusClaimed').val() === false && newData.child('updatedAt').val() === now) || (data.exists() && newData.child('updatedAt').val() === now && ((now >= data.child('windowStart').val() + 86400000 && newData.child('windowStart').val() === now && newData.child('coins').val() === data.child('coins').val() && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('watchCount').val() === 0 && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === false && newData.child('dailyBonusClaimed').val() === false) || (now < data.child('windowStart').val() + 86400000 && newData.child('windowStart').val() === data.child('windowStart').val() && newData.child('watchCount').val() === data.child('watchCount').val() + 1 && newData.child('watchCount').val() <= 20 && newData.child('coins').val() === data.child('coins').val() + 10 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === data.child('streakClaimed').val() && newData.child('dailyBonusClaimed').val() === data.child('dailyBonusClaimed').val()) || (now < data.child('windowStart').val() + 86400000 && newData.child('windowStart').val() === data.child('windowStart').val() && data.child('streakClaimed').val() === false && newData.child('streakClaimed').val() === true && newData.child('streakDay').val() === (data.child('streakDay').val() === 7 ? 1 : data.child('streakDay').val() + 1) && newData.child('coins').val() === data.child('coins').val() + (newData.child('streakDay').val() === 1 ? 10 : newData.child('streakDay').val() === 2 ? 15 : newData.child('streakDay').val() === 3 ? 20 : newData.child('streakDay').val() === 4 ? 25 : newData.child('streakDay').val() === 5 ? 30 : newData.child('streakDay').val() === 6 ? 35 : 40) && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('watchCount').val() === data.child('watchCount').val() && newData.child('dailyBonusClaimed').val() === data.child('dailyBonusClaimed').val()) || (now < data.child('windowStart').val() + 86400000 && newData.child('windowStart').val() === data.child('windowStart').val() && data.child('dailyBonusClaimed').val() === false && newData.child('dailyBonusClaimed').val() === true && newData.child('coins').val() >= data.child('coins').val() + 1 && newData.child('coins').val() <= data.child('coins').val() + 20 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('watchCount').val() === data.child('watchCount').val() && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === data.child('streakClaimed').val()) || (newData.child('windowStart').val() === data.child('windowStart').val() && newData.child('watchCount').val() === data.child('watchCount').val() && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === data.child('streakClaimed').val() && newData.child('dailyBonusClaimed').val() === data.child('dailyBonusClaimed').val() && newData.child('coins').val() <= data.child('coins').val() - 100 && (data.child('coins').val() - newData.child('coins').val()) % 100 === 0 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() + ((data.child('coins').val() - newData.child('coins').val()) / 100))) ))",
+          ".validate": "newData.hasChildren(['coins', 'bonusWallet', 'windowStart', 'watchCount', 'streakDay', 'streakClaimed', 'dailyBonusClaimed', 'updatedAt']) && newData.numChildren() === 8",
+          "coins": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
+          },
+          "bonusWallet": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
+          },
+          "windowStart": {
+            ".validate": "newData.isNumber() && newData.val() > 0"
+          },
+          "watchCount": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20 && newData.val() % 1 === 0"
+          },
+          "streakDay": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 7 && newData.val() % 1 === 0"
+          },
+          "streakClaimed": {
+            ".validate": "newData.isBoolean()"
+          },
+          "dailyBonusClaimed": {
+            ".validate": "newData.isBoolean()"
+          },
+          "updatedAt": {
+            ".validate": "newData.isNumber() && newData.val() > 0"
+          }
+        }
+      }
+    },
+    "matches": {
+      ".read": "auth != null",
+      "$matchId": {
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
+        "players": {
+          "$uid": {
+            ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || (auth.uid === $uid && !data.exists() && newData.child('feePaid').val() === root.child('matches').child($matchId).child('fee').val()))",
+            ".validate": "newData.hasChildren(['ign', 'bgmiId', 'joinedAt', 'feePaid'])"
+          }
+        },
+        "joined": {
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || (newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1 && newData.val() <= root.child('matches').child($matchId).child('slots').val()))"
+        }
+      }
+    },
+    "usedUtrs": {
+      ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+      "$utr": {
+        ".write": "auth != null && !data.exists() && newData.child('uid').val() === auth.uid",
+        ".validate": "newData.hasChildren(['uid', 'depositId', 'createdAt'])"
+      }
+    },
+    "deposits": {
+      ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+      "$id": {
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('status').val() === 'PENDING'))"
+      }
+    },
+    "withdrawals": {
+      ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+      "$id": {
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('status').val() === 'PENDING' && newData.child('amt').val() >= 50))"
+      }
+    },
+    "config": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'"
+    },
+    "match_hisaab": {
+      ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+      ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'"
+    },
+    "chatModeration": {
+      ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
+      "$uid": {
+        ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || auth.uid === $uid)",
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')"
+      }
+    },
+    "chat": {
+      ".read": "auth != null",
+      "$messageId": {
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('role').val() === (root.child('users').child(auth.uid).child('role').val() === 'coadmin' ? 'coadmin' : 'player')))"
+      }
+    }
+  }
+}
