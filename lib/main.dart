@@ -1782,8 +1782,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       'users/${widget.uid}/bgmiId': leader['bgmiId'],
                       'users/${widget.uid}/txns/$txnId': txn,
                       'matches/${m['id']}/players/${widget.uid}': roster,
-                      'matches/${m['id']}/joined': _num(m['joined']) + 1,
-                    };
+                      };
                     if (discount > 0 && !hasDiscountReservation) {
                       final nextRewards = Map<String, dynamic>.from(_rewards);
                       final used = nextRewards['discountsUsed'] is Map
@@ -1806,11 +1805,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       _bgmiId = leader['bgmiId'].toString();
                       _wallet = playerBalance;
                       _txns.insert(0, {'id': txnId, ...txn});
-                      m['joined'] = _num(m['joined']) + 1;
-                      m['isJoined'] = true;
                       final players = m['players'] is Map ? Map<String, dynamic>.from(m['players']) : <String, dynamic>{};
                       players[widget.uid] = roster;
                       m['players'] = players;
+                      m['joined'] = players.length;
+                      m['isJoined'] = true;
                     });
                     _msg('Team slot confirmed! Main Wallet ₹$payable paid; Bonus discount ₹$discount applied.');
                   } catch (err) {
