@@ -88,6 +88,27 @@ class _AdViewerDialogState extends State<AdViewerDialog> {
         if (target != null) _pendingExternalUrl = target.toString();
       })
       ..setNavigationDelegate(NavigationDelegate(
+        onPageFinished: (url) async {
+          try {
+            await _controller.runJavaScript('''
+              (function() {
+                if (window.__skEspAdsHooked) return;
+                window.__skEspAdsHooked = true;
+                window.open = function(target) {
+                  if (target) AdExternal.postMessage(String(target));
+                  return null;
+                };
+                document.addEventListener('click', function(event) {
+                  var anchor = event.target && event.target.closest ? event.target.closest('a') : null;
+                  if (anchor && anchor.href && anchor.target === '_blank') {
+                    event.preventDefault();
+                    AdExternal.postMessage(anchor.href);
+                  }
+                }, true);
+              })();
+            ''');
+          } catch (_) {}
+        },
         onNavigationRequest: (request) {
           final raw = request.url;
           final uri = Uri.tryParse(raw);
@@ -1348,6 +1369,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final trimmedUrl = url.trim();
     final uri = _resolveAdTarget(trimmedUrl);
     if (trimmedUrl.isEmpty || uri == null) {
+      if (seconds == null) {
+        _msg('Reward Ad link valid nahi hai. Admin se valid Adsterra URL set karwayein.');
+        return;
+      }
       onContinue();
       return;
     }
