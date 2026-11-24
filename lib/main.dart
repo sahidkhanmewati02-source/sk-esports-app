@@ -63,7 +63,8 @@ class AdViewerDialog extends StatefulWidget {
   final String title, url;
   final int? seconds;
   final VoidCallback onContinue;
-  const AdViewerDialog({super.key, required this.title, required this.url, required this.seconds, required this.onContinue});
+  final bool openExternalOnClose;
+  const AdViewerDialog({super.key, required this.title, required this.url, required this.seconds, required this.onContinue, this.openExternalOnClose = false});
   @override
   State<AdViewerDialog> createState() => _AdViewerDialogState();
 }
@@ -144,7 +145,7 @@ class _AdViewerDialogState extends State<AdViewerDialog> {
     _timer?.cancel();
     final destination = _pendingExternalUrl ?? _lastHttpUrl ?? widget.url;
     if (mounted) Navigator.of(context).pop();
-    await _openAdTargetOnce(destination);
+    if (widget.openExternalOnClose) await _openAdTargetOnce(destination);
     widget.onContinue();
   }
 
@@ -464,7 +465,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _referralCount = 0, _referralEarnings = 0;
   String _referralCode = '', _referredBy = '';
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
-  String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com', _rewardAdUrl = 'https://example.com';
+  String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com', _rewardAdUrl = '';
   String _promoImageUrl = '', _promoClickUrl = '';
   String _adsterraBannerCode = '';
   bool _promoEnabled = false, _autoBannerAdEnabled = true;
@@ -478,7 +479,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _upiC = TextEditingController(), _qrC = TextEditingController();
   final _joinAdUrlController = TextEditingController(text: 'https://example.com');
   final _roomAdUrlController = TextEditingController(text: 'https://example.com');
-  final _rewardAdUrlController = TextEditingController(text: 'https://example.com');
+  final _rewardAdUrlController = TextEditingController();
   final _promoImageUrlController = TextEditingController();
   final _promoClickUrlController = TextEditingController();
   final _adsterraBannerCodeController = TextEditingController();
@@ -586,7 +587,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _qrUrl = c['qrUrl'] ?? '';
         _joinAdUrl = c['joinAdUrl'] ?? 'https://example.com';
         _roomAdUrl = c['roomAdUrl'] ?? 'https://example.com';
-        _rewardAdUrl = c['rewardAdUrl'] ?? 'https://example.com';
+        final configuredRewardUrl = (c['rewardAdUrl'] ?? '').toString().trim();
+        _rewardAdUrl = configuredRewardUrl.toLowerCase() == 'https://example.com' || configuredRewardUrl.toLowerCase() == 'http://example.com' ? '' : configuredRewardUrl;
         _promoImageUrl = c['promoImageUrl'] ?? '';
         _promoClickUrl = c['promoClickUrl'] ?? '';
         _promoEnabled = c['promoEnabled'] == true;
@@ -1379,7 +1381,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AdViewerDialog(title: title, url: uri.toString(), seconds: seconds, onContinue: onContinue),
+      builder: (_) => AdViewerDialog(title: title, url: uri.toString(), seconds: seconds, onContinue: onContinue, openExternalOnClose: seconds == null),
     );
   }
 
@@ -1780,7 +1782,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       'users/${widget.uid}/bgmiId': leader['bgmiId'],
                       'users/${widget.uid}/txns/$txnId': txn,
                       'matches/${m['id']}/players/${widget.uid}': roster,
-                      'matches/${m['id']}/joined': {'.sv': {'increment': 1}},
+                      'matches/${m['id']}/joined': _num(m['joined']) + 1,
                     };
                     if (discount > 0 && !hasDiscountReservation) {
                       final nextRewards = Map<String, dynamic>.from(_rewards);
@@ -1798,7 +1800,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
                     }
                     final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
-                    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}). Wallet/slot update nahi hua.');
+                    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}): ${res.body}. Wallet/slot update nahi hua.');
                     if (mounted) setState(() {
                       _ign = leader['ign'].toString();
                       _bgmiId = leader['bgmiId'].toString();
@@ -1972,15 +1974,15 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
             OutlinedButton(
-              onPressed: () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
+              onPressed: _rewardAdUrl.trim().isEmpty ? null : () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
               child: Text('Watch & Earn ($watched/20)'),
             ),
             OutlinedButton(
-              onPressed: () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
+              onPressed: _rewardAdUrl.trim().isEmpty ? null : () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
               child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
             ),
             OutlinedButton(
-              onPressed: () => _showTimedAd(title: 'Daily Bonus', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('daily')),
+              onPressed: _rewardAdUrl.trim().isEmpty ? null : () => _showTimedAd(title: 'Daily Bonus', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('daily')),
               child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
             ),
             ElevatedButton(
@@ -1989,7 +1991,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
             ),
           ]),
-          const Text('Limits: 20 ad claims/day × 10 coins; Streak 10–40 coins; Daily Bonus 1–20 coins. Ad-view authenticity Firebase Spark client-only par verify nahi hoti.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          const Text('Reward Ads link Admin settings mein set hone ke baad claims available honge. Ad ko naturally load hone dein (aam taur par 15–30 sec); Close/Skip par destination ek baar open hoga. Fixed timer nahi hai. Firebase Spark client-only ad-view verify nahi karta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
     );
@@ -2637,7 +2639,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 8),
                 TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Room Ad Direct Link (5 sec)')),
                 const SizedBox(height: 8),
-                TextField(controller: _rewardAdUrlController, decoration: const InputDecoration(labelText: 'Reward Ads Direct Link (full-screen; no app timer)')),
+                TextField(controller: _rewardAdUrlController, decoration: const InputDecoration(labelText: 'Reward Ads Direct Link (Adsterra)', hintText: 'Paste your real Adsterra direct link')),
                 const SizedBox(height: 8),
                 TextField(controller: _promoImageUrlController, decoration: const InputDecoration(labelText: 'Promo Image URL')),
                 const SizedBox(height: 8),
@@ -2672,7 +2674,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: _saveAdAndPromoConfig,
                   child: const Text('Save Ad & Promo Settings'),
                 ),
-                const Text('Dummy URL abhi example.com hai. Real Adsterra link baad mein yahin paste karein.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                const Text('Reward Ads ke liye real Adsterra direct link zaroori hai. example.com placeholder use nahi hota. Join/Room ad timers 10s/5s unchanged.', style: TextStyle(fontSize: 11, color: Colors.grey)),
               ]),
             ),
           ),
