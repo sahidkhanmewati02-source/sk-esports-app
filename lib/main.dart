@@ -26,7 +26,7 @@ void main() => runApp(MaterialApp(
 Uri? _resolveAdTarget(String raw) {
   final value = raw.trim();
   if (value.startsWith('intent://')) {
-    final fallback = RegExp(r'S\\.browser_fallback_url=([^;]+)').firstMatch(value);
+    final fallback = RegExp(r'S\.browser_fallback_url=([^;]+)').firstMatch(value);
     if (fallback != null) {
       final decoded = Uri.decodeComponent(fallback.group(1)!);
       final parsed = Uri.tryParse(decoded);
@@ -258,7 +258,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (!_isLogin && _referral.text.trim().isNotEmpty) {
         final code = _referral.text.trim();
         if (code == uid) throw Exception('Apna referral code khud use nahi kar sakte.');
-        final refRes = await http.get(Uri.parse('$kDbUrl/users/$code.json?auth=$token'));
+        final refRes = await http.get(Uri.parse('$kDbUrl/referralCodes/$code.json?auth=$token'));
         if (refRes.statusCode == 200 && refRes.body != 'null') {
           referredBy = code;
         } else {
@@ -283,6 +283,7 @@ class _AuthScreenState extends State<AuthScreen> {
             if (referredBy != null) 'referredBy': referredBy,
           }),
         );
+        await http.put(Uri.parse('$kDbUrl/referralCodes/$uid.json?auth=$token'), body: jsonEncode({'uid': uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
       }
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -608,6 +609,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         if (d['referralCode'] == null) {
           await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(widget.uid));
+          await http.put(Uri.parse('$kDbUrl/referralCodes/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
         }
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
@@ -1005,6 +1007,19 @@ class _HomeScreenState extends State<HomeScreen> {
               'users/$uid/txns/$txnId': {'title': 'Wallet Deposit', 'sub': 'UTR: ${d['utr']} • $dt', 'amt': amt, 'status': 'APPROVED', 'time': dt},
               'deposits/${d['id']}/status': 'APPROVED',
             };
+            final referredBy = (u['referredBy'] ?? '').toString();
+            if (amt >= 20 && referredBy.isNotEmpty && referredBy != uid && u['referralPaid'] != true) {
+              final referrer = _users.firstWhere((p) => p['uid']?.toString() == referredBy, orElse: () => {});
+              if (referrer.isNotEmpty) {
+                final refTxnId = DateTime.now().microsecondsSinceEpoch.toString() + 'r';
+                final refOldWallet = _num(referrer['wallet']);
+                patch['users/$referredBy/wallet'] = refOldWallet + 5;
+                patch['users/$referredBy/referralCount'] = _num(referrer['referralCount']) + 1;
+                patch['users/$referredBy/referralEarnings'] = _num(referrer['referralEarnings']) + 5;
+                patch['users/$referredBy/txns/$refTxnId'] = {'title': 'Referral Reward', 'sub': 'First approved deposit by ${u['ign'] ?? 'Player'}', 'amt': 5, 'status': 'CREDITED', 'time': dt};
+                patch['users/$uid/referralPaid'] = true;
+              }
+            }
             final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
             if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Deposit approval fail hui. Firebase Rules check karein.');
             _msg('Approved!'); _sync();
@@ -1328,8 +1343,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _showTimedAd({required String title, required String url, required int? seconds, required VoidCallback onContinue}) async {
     final trimmedUrl = url.trim();
-    final uri = Uri.tryParse(trimmedUrl);
-    if (trimmedUrl.isEmpty || uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
+    final uri = _resolveAdTarget(trimmedUrl);
+    if (trimmedUrl.isEmpty || uri == null) {
       onContinue();
       return;
     }
@@ -1679,7 +1694,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   for (var i = 0; i < teamSize; i++) {
                     final ign = nameControllers[i].text.trim();
                     final bgmiId = idControllers[i].text.trim();
-                    if (ign.isEmpty || bgmiId.length < 10 || bgmiId.length > 11 || !RegExp(r'^\\d+$').hasMatch(bgmiId)) {
+                    if (ign.isEmpty || bgmiId.length < 10 || bgmiId.length > 11 || !RegExp(r'^\d+).hasMatch(bgmiId)) {).hasMatch(bgmiId)) {
                       return _msg('Teammate ${i + 1} ka sahi BGMI Name aur 10–11 digit ID dalein.');
                     }
                     members.add({'ign': ign, 'bgmiId': bgmiId});
@@ -2296,7 +2311,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text('${i + 1}. ${p['ign'] ?? u['ign'] ?? 'Player'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      subtitle: Text('ID: ${p['bgmiId'] ?? '-'}', style: const TextStyle(fontSize: 12)),
+                      subtitle: Text(
+                        p['members'] is List
+                          ? (p['members'] as List).asMap().entries.map((e) => '${e.key + 1}. ${(e.value as Map)['ign'] ?? '-'} • ID: ${(e.value as Map)['bgmiId'] ?? '-'}').join('\\n')
+                          : 'ID: ${p['bgmiId'] ?? '-'}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       trailing: isSuperAdmin ? ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 10)),
                         onPressed: () {
