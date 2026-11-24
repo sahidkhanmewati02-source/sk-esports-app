@@ -663,7 +663,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _wallet = _num(d['wallet']);
         _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
         _rewardHistory = d['rewardHistory'] is Map
-            ? (d['rewardHistory'] as Map).entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'id': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()..sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)))
+            ? ((d['rewardHistory'] as Map).entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'id': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()..sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a))))
             : <dynamic>[];
         _referralCode = (d['referralCode'] ?? widget.uid).toString();
         _referralCount = _num(d['referralCount']);
