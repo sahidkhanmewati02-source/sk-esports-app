@@ -2064,9 +2064,13 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
             ),
           ]),
-          if (watchBlocked) Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-          if (streakBlocked) Text(rewardReason('streak'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-          if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+          if (rewardUrlMissing)
+            Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber))
+          else ...[
+            if (watchBlocked) Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+            if (streakBlocked) Text(rewardReason('streak'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+            if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+          ],
           if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
           const Text('Reward Ads link Admin settings mein set hone ke baad claims available honge. Ad ko naturally load hone dein (aam taur par 15–30 sec); Close/Skip par destination ek baar open hoga. Fixed timer nahi hai. Firebase Spark client-only ad-view verify nahi karta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
