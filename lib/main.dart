@@ -536,9 +536,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _slotNumberFor(Map m, String uid) {
     final players = m['players'];
-    if (players is Map && players[uid] is Map) {
-      final saved = _num((players[uid] as Map)['slotNumber']);
-      if (saved > 0) return saved;
+    if (players is Map) {
+      final player = players[uid];
+      if (player is Map) {
+        final saved = _num(player['slotNumber']);
+        if (saved > 0) return saved;
+      }
+      // Legacy roster entries may not have a persisted slotNumber.
+      // Use their existing roster order for display without attempting a
+      // Firebase write (which can fail under deployed RTDB rules).
+      var position = 0;
+      for (final key in players.keys) {
+        position++;
+        if (key.toString() == uid) return position;
+      }
+    } else if (players is List) {
+      final index = players.indexWhere((entry) => entry is Map && (entry['uid'] ?? entry['userId'] ?? '').toString() == uid);
+      if (index >= 0) return index + 1;
     }
     return 0;
   }
@@ -676,34 +690,9 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
         _matches = list;
-        // Save each legacy slot directly at its exact roster child path.
-        // A root /.json multi-location PATCH is subject to root-level rules and can be denied.
-        if (isSuperAdmin || _isCoAdmin) {
-          var migrationError = '';
-          for (final match in list) {
-            final players = match['players'];
-            if (players is! Map) continue;
-            var slot = 0;
-            for (final entry in players.entries) {
-              slot++;
-              if (entry.value is! Map || _num((entry.value as Map)['slotNumber']) > 0) continue;
-              final slotRes = await http.put(
-                Uri.parse('$kDbUrl/matches/${match['id']}/players/${entry.key}/slotNumber.json?auth=${widget.token}'),
-                body: jsonEncode(slot),
-              );
-              if (slotRes.statusCode >= 200 && slotRes.statusCode < 300) {
-                (entry.value as Map)['slotNumber'] = slot;
-              } else {
-                migrationError = slotRes.body;
-                break;
-              }
-            }
-            if (migrationError.isNotEmpty) break;
-          }
-          if (migrationError.isNotEmpty) {
-            _msg('Purane players ke slot numbers save nahi ho paye: $migrationError');
-          }
-        }
+        // Legacy slots are derived from roster order for display. Do not
+        // write them during screen refresh: deployed RTDB rules may reject
+        // these migration writes and block the admin workflow.
         _sortMatches();
       } else {
         final def = {'m1': {
