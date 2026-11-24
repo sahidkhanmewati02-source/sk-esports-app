@@ -321,6 +321,23 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  void _openRewardsPage() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(14),
+        children: [
+          _rewardsCard(),
+          const SizedBox(height: 10),
+          _referralCard(),
+        ],
+      ),
+    )));
+  }
+
   Widget build(BuildContext context) {
     if (_checking) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFFFF9800))));
@@ -673,7 +690,13 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
-          _txns = (d['txns'] as Map).values.toList().reversed.toList();
+          _txns = (d['txns'] as Map).entries
+              .where((entry) => entry.value is Map)
+              .map((entry) => <String, dynamic>{'id': entry.key.toString(), ...Map<String, dynamic>.from(entry.value as Map)})
+              .toList()
+            ..sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
+        } else {
+          _txns = [];
         }
       }
 
@@ -1366,7 +1389,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-        void _showHistory([Map? player]) {
+        int _historyTimestamp(Map entry) {
+    for (final key in ['createdAt', 'timestamp', 'timeStamp', 'updatedAt', 'date']) {
+      final value = entry[key];
+      final parsed = int.tryParse(value?.toString() ?? '');
+      if (parsed != null && parsed > 0) return parsed < 100000000000 ? parsed * 1000 : parsed;
+      if (value is String) {
+        final dt = DateTime.tryParse(value);
+        if (dt != null) return dt.millisecondsSinceEpoch;
+      }
+    }
+    final rawTime = (entry['time'] ?? '').toString();
+    final parsedTime = DateTime.tryParse(rawTime);
+    if (parsedTime != null) return parsedTime.millisecondsSinceEpoch;
+    return 0;
+  }
+
+  void _showHistory([Map? player]) {
     final list = [];
     final target = player == null ? _users : [player];
     for (final u in target) {
@@ -1376,6 +1415,7 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     }
+    list.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1971,21 +2011,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _referralCard() {
+    final code = _referralCode.isEmpty ? widget.uid : _referralCode;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('REFER & EARN', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-          const SizedBox(height: 10),
-          const Center(
-            child: Column(children: [
-              Icon(Icons.hourglass_top_rounded, color: Color(0xFFFF9800), size: 30),
-              SizedBox(height: 6),
-              Text('COMING SOON', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold, fontSize: 16)),
-              SizedBox(height: 4),
-              Text('Refer & Earn feature is temporarily unavailable.', style: TextStyle(color: Colors.white70, fontSize: 12), textAlign: TextAlign.center),
-            ]),
-          ),
+          const SizedBox(height: 5),
+          const Text('Friend ke first ₹20+ approved deposit par aapko ₹5 Main Wallet mein milenge.', style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: SelectableText('Your Code: $code', style: const TextStyle(fontWeight: FontWeight.bold))),
+            IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
+          ]),
+          Row(children: [
+            Expanded(child: Text('Successful referrals: $_referralCount', style: const TextStyle(color: Colors.white70, fontSize: 12))),
+            Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+          ]),
+          if (_referredBy.isNotEmpty) const Text('Referral linked to your account.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
     );
@@ -2033,8 +2076,8 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
             OutlinedButton(
-              onPressed: null,
-              child: const Text('Watch & Earn • Coming Soon'),
+              onPressed: watchBlocked ? null : () => _showTimedAd(title: 'Watch & Earn', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('watch')),
+              child: Text('Watch & Earn ($displayWatched/20)'),
             ),
             OutlinedButton(
               onPressed: streakBlocked ? null : () => _showTimedAd(title: 'Daily Streak', url: _rewardAdUrl, seconds: null, onContinue: () => _claimReward('streak')),
@@ -2058,7 +2101,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
           ],
           if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
-          const Text('Watch & Earn is temporarily unavailable and will return soon.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          const Text('Reward Ads link Admin settings mein set hone ke baad claims available honge. Ad ko naturally load hone dein (aam taur par 15–30 sec); Close/Skip par destination ek baar open hoga. Fixed timer nahi hai. Firebase Spark client-only ad-view verify nahi karta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
     );
@@ -2687,18 +2730,19 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          _rewardsCard(),
-          _referralCard(),
-          const SizedBox(height: 4),
+          const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 12, bottom: 6), child: Text('TRANSACTION HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
           Expanded(
-            child: ListView.builder(
-              itemCount: _txns.length,
-              itemBuilder: (_, i) => ListTile(
-                title: Text('${_txns[i]['title']}'),
-                subtitle: Text('${_txns[i]['sub']} • ${_txns[i]['status']}'),
-                trailing: Text('₹${_txns[i]['amt']}'),
-              ),
-            ),
+            child: _txns.isEmpty
+                ? const Center(child: Text('Abhi koi wallet transaction nahi hai.'))
+                : ListView.builder(
+                    itemCount: _txns.length,
+                    itemBuilder: (_, i) => ListTile(
+                      leading: const Icon(Icons.receipt_long, color: Color(0xFFFF9800)),
+                      title: Text('${_txns[i]['title'] ?? 'Wallet Transaction'}'),
+                      subtitle: Text('${_txns[i]['sub'] ?? ''} • ${_txns[i]['status'] ?? ''}'),
+                      trailing: Text('₹${_txns[i]['amt'] ?? 0}'),
+                    ),
+                  ),
           ),
         ]),
       ),
@@ -2795,6 +2839,14 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('SK ESPORTS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _sync),
+          Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: TextButton.icon(
+              onPressed: _openRewardsPage,
+              icon: const Icon(Icons.card_giftcard, color: Color(0xFFFF9800), size: 18),
+              label: const Text('Earn', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
