@@ -482,7 +482,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [], _pendingRewardClaims = [];
   int? _scratchRewardPreview, _spinRewardPreview;
   int _scratchGestureCount = 0;
-  double _spinRotation = 0;
+  int _spinLandingNumber = 1;
+  double _spinRotation = 0, _spinPreviousRotation = 0;
   bool _scratchBusy = false, _spinBusy = false;
   String _rulesText = 'BGMI Level 30+ ID required.\nRoom ID & Password match se 15 minute pehle milega.\nChat mein abuse, spam aur personal details share na karein.\nEntry fee aur withdrawal ke liye sahi UTR/UPI details dein.';
   final _chatC = TextEditingController(), _aboutLinksC = TextEditingController(), _rulesC = TextEditingController();
@@ -2359,7 +2360,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   int _weightedScratchSpinCoins() {
-    const weighted = [5, 5, 5, 5, 5, 7, 7, 7, 8, 8, 8, 8, 8, 12];
+    const weighted = [5, 5, 5, 5, 5, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 12];
     return weighted[math.Random.secure().nextInt(weighted.length)];
   }
 
@@ -2374,9 +2375,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_spinBusy || _rewardAdBusy || _spinRewardPreview != null) return;
     final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
     if ((sameDay ? _num(_rewards['spinCount']) : 0) >= 10) return _msg('Aaj ke 10 Spins complete ho gaye. Reset 5:00 AM IST par hoga.');
-    final reward = _weightedScratchSpinCoins();
-    setState(() { _spinBusy = true; _spinRotation += (math.pi * 8) + math.Random().nextDouble() * math.pi * 2; });
-    await Future<void>.delayed(const Duration(milliseconds: 1800));
+    const sectorRewards = [5, 7, 8, 5, 7, 8, 5, 7, 8, 8, 8, 12];
+    final sector = math.Random.secure().nextInt(sectorRewards.length);
+    final reward = sectorRewards[sector];
+    final step = (2 * math.pi) / 12;
+    final centerAngle = -math.pi / 2 + (sector + 0.5) * step;
+    final alignToPointer = (2 * math.pi - centerAngle) % (2 * math.pi);
+    setState(() {
+      _spinBusy = true;
+      _spinLandingNumber = sector + 1;
+      _spinPreviousRotation = _spinRotation;
+      _spinRotation += (math.pi * 12) + alignToPointer;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 1900));
     if (mounted) setState(() { _spinRewardPreview = reward; _spinBusy = false; });
   }
 
@@ -2543,7 +2554,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _scratchGestureCount++;
             if (_scratchGestureCount >= 8) _revealScratchCard();
           },
-          onTap: () { if (_scratchRewardPreview == null) _msg('Card ko ungli se rub/scratch karein.'); },
+          onTap: _revealScratchCard,
+          onPanStart: (_) => _revealScratchCard(),
           child: Container(
             height: 118, width: double.infinity,
             decoration: BoxDecoration(
@@ -2553,7 +2565,7 @@ class _HomeScreenState extends State<HomeScreen> {
               boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 4))],
             ),
             child: Center(child: _scratchRewardPreview == null
-              ? const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.touch_app, size: 32, color: Colors.white), SizedBox(height: 5), Text('RUB HERE TO SCRATCH', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.1)), Text('Scratch the card to reveal', style: TextStyle(color: Colors.white70, fontSize: 11))])
+              ? const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.touch_app, size: 32, color: Colors.white), SizedBox(height: 5), Text('RUB HERE TO SCRATCH', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.1)), Text('Tap or rub to reveal', style: TextStyle(color: Colors.white70, fontSize: 11))])
               : Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.stars, color: Colors.white, size: 30), Text('$_scratchRewardPreview COINS', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 25)), const Text('Reward revealed!', style: TextStyle(color: Colors.white70))]),
             ),
           ),
@@ -2568,15 +2580,15 @@ class _HomeScreenState extends State<HomeScreen> {
         SizedBox(height: 174, child: Stack(alignment: Alignment.topCenter, children: [
           Padding(padding: const EdgeInsets.only(top: 10), child: TweenAnimationBuilder<double>(
             key: ValueKey(_spinRotation),
-            tween: Tween<double>(begin: _spinRotation - (math.pi * 8), end: _spinRotation),
+            tween: Tween<double>(begin: _spinPreviousRotation, end: _spinRotation),
             duration: const Duration(milliseconds: 1800),
             curve: Curves.easeOutCubic,
             builder: (_, angle, child) => Transform.rotate(angle: angle, child: child),
-            child: Container(width: 148, height: 148, decoration: BoxDecoration(shape: BoxShape.circle, gradient: const SweepGradient(colors: [Color(0xFFFF9800), Color(0xFF00C853), Color(0xFF2196F3), Color(0xFFE91E63), Color(0xFFFFEB3B), Color(0xFFFF9800)]), border: Border.all(color: Colors.white, width: 3)), child: const Center(child: CircleAvatar(radius: 27, backgroundColor: Color(0xFF161B22), child: Icon(Icons.casino, color: Color(0xFFFFB300), size: 32)))),
+            child: CustomPaint(size: const Size(148, 148), painter: _RewardWheelPainter()),
           )),
           const Icon(Icons.arrow_drop_down, size: 42, color: Colors.white),
         ])),
-        Text(_spinRewardPreview == null ? (_spinBusy ? 'Spinning...' : 'Tap SPIN to start') : '$_spinRewardPreview COINS WON!', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+        Text(_spinRewardPreview == null ? (_spinBusy ? 'Spinning...' : 'Tap SPIN to start') : 'Sector $_spinLandingNumber → $_spinRewardPreview COINS WON!', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         ElevatedButton(onPressed: spinCount >= 10 || spinBusy || _spinRewardPreview != null ? null : _revealSpin, child: Text(spinBusy ? 'SPINNING...' : 'SPIN NOW')),
         ElevatedButton(onPressed: _spinRewardPreview == null || spinBusy || _rewardAdBusy ? null : () async { await _claimScratchOrSpin('spin'); onChanged?.call(); }, child: Text(_rewardAdBusy ? 'Loading Ad...' : 'CLAIM • WATCH AD')),
@@ -3410,4 +3422,49 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+class _RewardWheelPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    const colors = [
+      Color(0xFFFF9800), Color(0xFF00C853), Color(0xFF2196F3),
+      Color(0xFFE91E63), Color(0xFFFFC107), Color(0xFF7C4DFF),
+      Color(0xFF00BCD4), Color(0xFFFF5722), Color(0xFF8BC34A),
+      Color(0xFF3F51B5), Color(0xFFE91E63), Color(0xFF795548),
+    ];
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius - 2);
+    const sweep = (2 * math.pi) / 12;
+    final paint = Paint()..style = PaintingStyle.fill;
+    for (var i = 0; i < 12; i++) {
+      final start = -math.pi / 2 + i * sweep;
+      paint.color = colors[i];
+      canvas.drawArc(rect, start, sweep, true, paint);
+      final angle = start + sweep / 2;
+      final point = Offset(center.dx + math.cos(angle) * radius * 0.70,
+          center.dy + math.sin(angle) * radius * 0.70);
+      final tp = TextPainter(
+        text: TextSpan(text: '${i + 1}', style: const TextStyle(
+          color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900,
+          shadows: [Shadow(color: Colors.black87, blurRadius: 3)],
+        )),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      canvas.save();
+      canvas.translate(point.dx, point.dy);
+      canvas.rotate(angle + math.pi / 2);
+      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+      canvas.restore();
+      canvas.drawLine(center, Offset(center.dx + math.cos(start) * radius,
+          center.dy + math.sin(start) * radius),
+          Paint()..color = Colors.white..strokeWidth = 1.5);
+    }
+    canvas.drawCircle(center, 18, Paint()..color = const Color(0xFF161B22));
+    canvas.drawCircle(center, 18, Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 2);
+  }
+
+  @override
+  bool shouldRepaint(covariant _RewardWheelPainter oldDelegate) => false;
 }
