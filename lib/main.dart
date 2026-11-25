@@ -2058,7 +2058,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Normalize legacy reward records before the daily reset PUT.
     next['coins'] = _num(next['coins']);
     next['bonusWallet'] = _num(next['bonusWallet']);
-    next['windowStart'] = next['windowStart'] ?? {'.sv': 'timestamp'};
+    next['windowStart'] = _num(next['windowStart']) > 0 ? _num(next['windowStart']) : {'.sv': 'timestamp'};
     next['rewardDayKey'] = today;
     next['rewardDayStart'] = _currentRewardDayStart();
     next['watchCount'] = 0;
@@ -2139,7 +2139,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await loaded.future.timeout(const Duration(seconds: 45));
       final finished = Completer<bool>();
       await UnityAds.showVideoAd(
-        placementId: _unityRewardedPlacementId.trim(),
+        placementId: placementId,
         onStart: (id) { adStarted = true; debugPrint('[SK ESPORTS] Unity ad started: $id'); },
         onSkipped: (id) { debugPrint('[SK ESPORTS] Unity ad skipped: $id'); markCooldownOnce(); if (!finished.isCompleted) finished.complete(false); },
         onComplete: (id) { debugPrint('[SK ESPORTS] Unity rewarded ad completed: $id'); markCooldownOnce(); if (!finished.isCompleted) finished.complete(true); },
