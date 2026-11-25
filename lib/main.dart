@@ -2337,33 +2337,55 @@ class _HomeScreenState extends State<HomeScreen> {
       'rewardDayKey': dayKey,
       'createdAt': DateTime.now().millisecondsSinceEpoch,
     };
-    final patch = <String, dynamic>{
-      'users/${widget.uid}/rewards': next,
-      'users/${widget.uid}/rewardHistory/$historyId': history,
-    };
     String idToken;
     try {
       idToken = await _freshRewardsIdToken();
-    } catch (_) {
-      return _msg('Session refresh nahi hua. Please dobara login karein.');
+    } catch (error) {
+      debugPrint('[SK ESPORTS] Reward token refresh failed: $error');
+      return _msg('Session refresh nahi hua. Internet check karke dobara login karein.');
     }
-    final res = await http.patch(
-      Uri.parse('$kDbUrl/.json?auth=${Uri.encodeQueryComponent(idToken)}'),
+
+    // IMPORTANT: Write directly to this user's rewards node. A PATCH to
+    // /.json is evaluated at the database root and is blocked by the
+    // admin-only root .write rule, even when child paths have user rules.
+    final rewardsRes = await http.patch(
+      Uri.parse(
+        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}',
+      ),
       headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode(patch),
+      body: jsonEncode(next),
     );
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      if (res.statusCode == 401 || res.statusCode == 403) {
-        return _msg('Session verify nahi hua. Please dobara login karein.');
+    if (rewardsRes.statusCode < 200 || rewardsRes.statusCode >= 300) {
+      _lastRewardsWriteError =
+          'Reward node HTTP ${rewardsRes.statusCode}: ${rewardsRes.body}';
+      debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
+      if (rewardsRes.statusCode == 401 || rewardsRes.statusCode == 403) {
+        return _msg('Firebase ne reward save reject kiya. Rules check required.');
       }
       return _msg('Reward save nahi hua. Refresh karke dobara try karein.');
     }
+
+    // The balance/count is already saved. History is a separate child write
+    // because the root multi-location PATCH is not permitted for players.
     _rewards = next;
     _rewardHistory.insert(0, {
       'id': historyId,
       ...history,
       'createdAt': DateTime.now().millisecondsSinceEpoch,
     });
+    final historyRes = await http.put(
+      Uri.parse(
+        '$kDbUrl/users/${widget.uid}/rewardHistory/$historyId.json?auth=${Uri.encodeQueryComponent(idToken)}',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(history),
+    );
+    if (historyRes.statusCode < 200 || historyRes.statusCode >= 300) {
+      debugPrint(
+        '[SK ESPORTS] Reward paid but history write failed: '
+        'HTTP ${historyRes.statusCode}: ${historyRes.body}',
+      );
+    }
     _rewardHistory.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
     if (mounted) setState(() {});
     _msg('Mubarak! $reward coins Bonus Wallet rewards mein add hue.');
