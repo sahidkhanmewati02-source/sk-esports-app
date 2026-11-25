@@ -2043,49 +2043,65 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_rewards['rewardDayKey'] == today &&
         _num(_rewards['rewardDayStart']) == dayStart) return true;
 
-    // Preserve balances exactly; only daily counters/flags are reset.
-    final next = Map<String, dynamic>.from(_rewards);
-    next['coins'] = _num(_rewards['coins']);
-    next['bonusWallet'] = _num(_rewards['bonusWallet']);
-    next['windowStart'] = _num(_rewards['windowStart']) > 0
-        ? _num(_rewards['windowStart'])
-        : DateTime.now().millisecondsSinceEpoch;
-    next['rewardDayKey'] = today;
-    next['rewardDayStart'] = dayStart;
-    next['watchCount'] = 0;
-    next['streakDay'] = _num(_rewards['streakDay']).clamp(0, 7);
-    next['streakClaimed'] = false;
-    next['dailyBonusClaimed'] = false;
-    next['discountMatchId'] = _rewards['discountMatchId']?.toString() ?? '';
-    next['discountAmount'] = _num(_rewards['discountAmount']);
-    next['discountsUsed'] = _rewards['discountsUsed'] is Map
-        ? Map<String, dynamic>.from(_rewards['discountsUsed'] as Map)
-        : <String, dynamic>{'_init': false};
-    // Rules validate updatedAt as a positive number; send numeric epoch ms.
-    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
+    // PATCH only reset fields. Never PUT a stale full rewards snapshot:
+    // this keeps concurrent coins/bonusWallet changes safe on the server.
+    final patch = <String, dynamic>{
+      'rewardDayKey': today,
+      'rewardDayStart': dayStart,
+      'watchCount': 0,
+      'streakDay': _num(_rewards['streakDay']).clamp(0, 7),
+      'streakClaimed': false,
+      'dailyBonusClaimed': false,
+      'updatedAt': DateTime.now().millisecondsSinceEpoch,
+    };
 
-    final saved = await _putRewards(next);
-    if (!saved) {
-      // Re-read once in case another device completed the reset concurrently.
-      try {
-        final fresh = await http.get(Uri.parse(
-          '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}',
-        ));
-        if (fresh.statusCode == 200 && fresh.body != 'null') {
-          final value = jsonDecode(fresh.body);
-          if (value is Map) _rewards = Map<String, dynamic>.from(value);
-          if (_rewards['rewardDayKey'] == today &&
-              _num(_rewards['rewardDayStart']) == dayStart) {
-            _lastRewardsWriteError = '';
-            return true;
-          }
-        }
-      } catch (error) {
-        debugPrint('[SK ESPORTS] Rewards reset verification failed: $error');
-      }
-      debugPrint('[SK ESPORTS] Daily reset failed. uid=${widget.uid} dayKey=$today dayStart=$dayStart error=$_lastRewardsWriteError');
+    // Complete legacy records only where required by the rewards validator.
+    // Existing balances and existing settings are deliberately never rewritten.
+    if (!_rewards.containsKey('coins')) patch['coins'] = 0;
+    if (!_rewards.containsKey('bonusWallet')) patch['bonusWallet'] = 0;
+    if (!_rewards.containsKey('windowStart')) {
+      patch['windowStart'] = DateTime.now().millisecondsSinceEpoch;
     }
-    return saved;
+    if (!_rewards.containsKey('discountMatchId')) patch['discountMatchId'] = '';
+    if (!_rewards.containsKey('discountAmount')) patch['discountAmount'] = 0;
+    if (_rewards['discountsUsed'] is! Map) {
+      patch['discountsUsed'] = <String, dynamic>{'_init': false};
+    }
+
+    try {
+      final res = await http.patch(
+        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}'),
+        headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: jsonEncode(patch),
+      );
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        _lastRewardsWriteError = 'HTTP ${res.statusCode}: ${res.body}';
+        debugPrint('[SK ESPORTS] Daily reset PATCH rejected: $_lastRewardsWriteError');
+        return false;
+      }
+
+      // PATCH response can be partial; fetch the complete canonical node.
+      final verify = await http.get(Uri.parse(
+        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}',
+      ));
+      if (verify.statusCode == 200 && verify.body != 'null') {
+        final value = jsonDecode(verify.body);
+        if (value is Map) _rewards = Map<String, dynamic>.from(value);
+      }
+      if (_rewards['rewardDayKey'] == today &&
+          _num(_rewards['rewardDayStart']) == dayStart) {
+        _lastRewardsWriteError = '';
+        if (mounted) setState(() {});
+        return true;
+      }
+      _lastRewardsWriteError = 'Reset verification failed: latest rewards day did not match';
+      debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
+      return false;
+    } catch (error, stackTrace) {
+      _lastRewardsWriteError = 'Network/client exception: $error';
+      debugPrint('[SK ESPORTS] Daily reset PATCH exception: $_lastRewardsWriteError\\n$stackTrace');
+      return false;
+    }
   }
 
   Future<void> _startRewardCooldown() async {
