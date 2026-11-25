@@ -28,31 +28,10 @@
           }
         },
         "rewards": {
-          ".write": "auth != null && auth.uid === $uid && newData.child('updatedAt').val() === now && ( (!data.exists() && newData.child('coins').val() === 0 && newData.child('bonusWallet').val() === 0 && newData.child('windowStart').val() === now && newData.child('rewardDayStart').val() === (now - ((now - 84600000) % 86400000)) && newData.child('watchCount').val() === 0 && newData.child('streakDay').val() === 0 && newData.child('streakClaimed').val() === false && newData.child('dailyBonusClaimed').val() === false && newData.child('discountMatchId').val() === '' && newData.child('discountAmount').val() === 0 && newData.child('discountsUsed').child('_init').val() === false) || ((data.exists() && !data.child('rewardDayStart').exists() && newData.child('rewardDayStart').val() === (now - ((now - 84600000) % 86400000)) && newData.child('coins').val() === data.child('coins').val() && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('watchCount').val() === 0 && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === false && newData.child('dailyBonusClaimed').val() === false && newData.child('discountMatchId').val() === (data.child('discountMatchId').exists() ? data.child('discountMatchId').val() : '') && newData.child('discountAmount').val() === (data.child('discountAmount').exists() ? data.child('discountAmount').val() : 0) && (data.child('discountsUsed').exists() ? newData.child('discountsUsed').val() === data.child('discountsUsed').val() : newData.child('discountsUsed').child('_init').val() === false)) || (data.exists() && data.child('rewardDayStart').val() !== (now - ((now - 84600000) % 86400000)) && newData.child('rewardDayStart').val() === (now - ((now - 84600000) % 86400000)) && newData.child('coins').val() === data.child('coins').val() && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('watchCount').val() === 0 && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === false && newData.child('dailyBonusClaimed').val() === false && newData.child('discountMatchId').val() === data.child('discountMatchId').val() && newData.child('discountAmount').val() === data.child('discountAmount').val() && newData.child('discountsUsed').val() === data.child('discountsUsed').val())) || (data.exists() && newData.child('rewardDayStart').val() === data.child('rewardDayStart').val() && newData.child('rewardDayKey').val() === data.child('rewardDayKey').val() && ( (newData.child('rewardDayStart').val() === data.child('rewardDayStart').val() && newData.child('watchCount').val() === data.child('watchCount').val() + 1 && newData.child('watchCount').val() <= 20 && newData.child('coins').val() === data.child('coins').val() + 10 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === data.child('streakClaimed').val() && newData.child('dailyBonusClaimed').val() === data.child('dailyBonusClaimed').val() && newData.child('discountMatchId').val() === data.child('discountMatchId').val() && newData.child('discountAmount').val() === data.child('discountAmount').val() && newData.child('discountsUsed').val() === data.child('discountsUsed').val()) || (newData.child('rewardDayStart').val() === data.child('rewardDayStart').val() && data.child('streakClaimed').val() === false && newData.child('streakClaimed').val() === true && newData.child('streakDay').val() === (data.child('streakDay').val() === 7 ? 1 : data.child('streakDay').val() + 1) && newData.child('coins').val() === data.child('coins').val() + (newData.child('streakDay').val() === 1 ? 10 : newData.child('streakDay').val() === 2 ? 15 : newData.child('streakDay').val() === 3 ? 20 : newData.child('streakDay').val() === 4 ? 25 : newData.child('streakDay').val() === 5 ? 30 : newData.child('streakDay').val() === 6 ? 35 : 40) && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('watchCount').val() === data.child('watchCount').val() && newData.child('dailyBonusClaimed').val() === data.child('dailyBonusClaimed').val() && newData.child('discountMatchId').val() === data.child('discountMatchId').val() && newData.child('discountAmount').val() === data.child('discountAmount').val() && newData.child('discountsUsed').val() === data.child('discountsUsed').val()) || (newData.child('rewardDayStart').val() === data.child('rewardDayStart').val() && data.child('dailyBonusClaimed').val() === false && newData.child('dailyBonusClaimed').val() === true && newData.child('coins').val() >= data.child('coins').val() + 1 && newData.child('coins').val() <= data.child('coins').val() + 20 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() && newData.child('watchCount').val() === data.child('watchCount').val() && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === data.child('streakClaimed').val() && newData.child('discountMatchId').val() === data.child('discountMatchId').val() && newData.child('discountAmount').val() === data.child('discountAmount').val() && newData.child('discountsUsed').val() === data.child('discountsUsed').val()) || (newData.child('rewardDayStart').val() === data.child('rewardDayStart').val() && newData.child('coins').val() <= data.child('coins').val() - 100 && (data.child('coins').val() - newData.child('coins').val()) % 100 === 0 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() + ((data.child('coins').val() - newData.child('coins').val()) / 100) && newData.child('watchCount').val() === data.child('watchCount').val() && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === data.child('streakClaimed').val() && newData.child('dailyBonusClaimed').val() === data.child('dailyBonusClaimed').val() && newData.child('discountMatchId').val() === data.child('discountMatchId').val() && newData.child('discountAmount').val() === data.child('discountAmount').val() && newData.child('discountsUsed').val() === data.child('discountsUsed').val()) || (newData.child('rewardDayStart').val() === data.child('rewardDayStart').val() && newData.child('coins').val() === data.child('coins').val() && newData.child('watchCount').val() === data.child('watchCount').val() && newData.child('streakDay').val() === data.child('streakDay').val() && newData.child('streakClaimed').val() === data.child('streakClaimed').val() && newData.child('dailyBonusClaimed').val() === data.child('dailyBonusClaimed').val() && newData.child('discountMatchId').isString() && newData.child('discountMatchId').val() !== '' && (data.child('discountMatchId').val() === '' || root.child('matches').child(data.child('discountMatchId').val()).child('players').child(auth.uid).exists()) && data.child('discountsUsed').child(newData.child('discountMatchId').val()).exists() === false && newData.child('discountsUsed').child(newData.child('discountMatchId').val()).val() === true && newData.child('discountAmount').isNumber() && newData.child('discountAmount').val() > 0 && newData.child('discountAmount').val() <= root.child('matches').child(newData.child('discountMatchId').val()).child('fee').val() * (root.child('matches').child(newData.child('discountMatchId').val()).child('mode').val() === 'SQUAD' ? 4 : (root.child('matches').child(newData.child('discountMatchId').val()).child('mode').val() === 'DUO' ? 2 : 1)) / 10 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() - newData.child('discountAmount').val()) )) )",
-          ".validate": "newData.hasChildren(['coins','bonusWallet','windowStart','rewardDayKey','rewardDayStart','watchCount','streakDay','streakClaimed','dailyBonusClaimed','discountMatchId','discountAmount','discountsUsed','updatedAt'])",
-          "coins": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
-          },
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && newData.child('bonusWallet').isNumber() && newData.child('bonusWallet').val() >= 0 && (!data.exists() ? newData.child('bonusWallet').val() === 0 : newData.child('bonusWallet').val() <= data.child('bonusWallet').val()) && newData.child('discountMatchId').isString() && newData.child('discountAmount').isNumber() && newData.child('discountAmount').val() >= 0 && newData.child('discountsUsed').exists() && newData.child('updatedAt').val() === now && (!data.exists() || newData.child('bonusWallet').val() === data.child('bonusWallet').val() || (newData.child('discountAmount').val() > 0 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() - newData.child('discountAmount').val()))))",
+          ".validate": "newData.hasChildren(['bonusWallet','discountMatchId','discountAmount','discountsUsed','updatedAt'])",
           "bonusWallet": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
-          },
-          "windowStart": {
-            ".validate": "newData.isNumber() && newData.val() > 0"
-          },
-          "watchCount": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20 && newData.val() % 1 === 0"
-          },
-          "streakDay": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 7 && newData.val() % 1 === 0"
-          },
-          "streakClaimed": {
-            ".validate": "newData.isBoolean()"
-          },
-          "dailyBonusClaimed": {
-            ".validate": "newData.isBoolean()"
-          },
-          "updatedAt": {
-            ".validate": "newData.isNumber() && newData.val() > 0"
           },
           "discountMatchId": {
             ".validate": "newData.isString()"
@@ -65,41 +44,13 @@
               ".validate": "newData.isBoolean()"
             }
           },
-          "rewardDayKey": {
-            ".validate": "newData.isString() && newData.val().length === 10"
-          },
-          "rewardDayStart": {
+          "updatedAt": {
             ".validate": "newData.isNumber() && newData.val() > 0"
           }
         },
         "referralCode": {
           ".write": "auth != null && auth.uid === $uid && newData.val() === auth.uid",
           ".validate": "newData.isString() && newData.val() === $uid"
-        },
-        "rewardHistory": {
-          ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || auth.uid === $uid)",
-          "$historyId": {
-            ".write": "auth != null && auth.uid === $uid && !data.exists() && newData.hasChildren(['type','title','coins','watchCount','streakDay','rewardDayKey','createdAt'])",
-            ".validate": "newData.child('type').val() === 'watch' || newData.child('type').val() === 'streak' || newData.child('type').val() === 'daily'",
-            "title": {
-              ".validate": "newData.isString()"
-            },
-            "coins": {
-              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 40"
-            },
-            "watchCount": {
-              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20"
-            },
-            "streakDay": {
-              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 7"
-            },
-            "rewardDayKey": {
-              ".validate": "newData.isString() && newData.val().length === 10"
-            },
-            "createdAt": {
-              ".validate": "newData.isNumber() && newData.val() > 0"
-            }
-          }
         }
       }
     },
