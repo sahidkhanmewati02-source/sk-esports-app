@@ -1549,7 +1549,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _adsterraBannerCode = _adsterraBannerCodeController.text.trim();
     final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode(data));
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      _msg('Ad, Promo aur Unity Ads settings saved!');
+      _msg('Join/Room Ads aur Promo settings saved!');
       if (mounted) setState(() {});
     } else {
       _msg('Settings save nahi hui. Firebase permission check karein.');
