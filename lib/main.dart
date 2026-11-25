@@ -306,6 +306,15 @@ class _AuthScreenState extends State<AuthScreen> {
           }),
         );
         await http.put(Uri.parse('$kDbUrl/referralCodes/$uid.json?auth=$token'), body: jsonEncode({'uid': uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
+        if (referredBy != null) {
+          final referralRes = await http.put(
+            Uri.parse('$kDbUrl/referralCodes/$referredBy/referrals/$uid.json?auth=$token'),
+            body: jsonEncode({'uid': uid, 'ign': _name.text.trim(), 'status': 'PENDING', 'createdAt': DateTime.now().millisecondsSinceEpoch, 'reward': 5}),
+          );
+          if (referralRes.statusCode < 200 || referralRes.statusCode >= 300) {
+            _msg('Account ban gaya, lekin referral pending record save nahi hua.');
+          }
+        }
       }
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -473,7 +482,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _superAdminUid = '';
   DateTime _clock = DateTime.now();
   Timer? _matchTicker;
-  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [];
+  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [], _referralHistory = [];
   String _rulesText = 'BGMI Level 30+ ID required.\nRoom ID & Password match se 15 minute pehle milega.\nChat mein abuse, spam aur personal details share na karein.\nEntry fee aur withdrawal ke liye sahi UTR/UPI details dein.';
   final _chatC = TextEditingController(), _aboutLinksC = TextEditingController(), _rulesC = TextEditingController();
   final _upiC = TextEditingController(), _qrC = TextEditingController();
@@ -650,6 +659,16 @@ class _HomeScreenState extends State<HomeScreen> {
         _referralCount = _num(d['referralCount']);
         _referralEarnings = _num(d['referralEarnings']);
         _referredBy = (d['referredBy'] ?? '').toString();
+        final referralHistoryRes = await http.get(Uri.parse('$kDbUrl/referralCodes/${widget.uid}/referrals.json?auth=${widget.token}'));
+        if (referralHistoryRes.statusCode == 200 && referralHistoryRes.body != 'null') {
+          final referralData = jsonDecode(referralHistoryRes.body);
+          _referralHistory = referralData is Map
+              ? referralData.entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'uid': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()
+              : [];
+          _referralHistory.sort((a, b) => _num(b['createdAt']).compareTo(_num(a['createdAt'])));
+        } else {
+          _referralHistory = [];
+        }
         final rewardKeys = ['bonusWallet','discountMatchId','discountAmount','discountsUsed','updatedAt'];
         if (_rewards.isEmpty) {
           await _ensureRewards();
@@ -1093,6 +1112,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 patch['users/$referredBy/referralCount'] = _num(referrer['referralCount']) + 1;
                 patch['users/$referredBy/referralEarnings'] = _num(referrer['referralEarnings']) + 5;
                 patch['users/$referredBy/txns/$refTxnId'] = {'title': 'Referral Reward', 'sub': 'First approved deposit by ${u['ign'] ?? 'Player'}', 'amt': 5, 'status': 'CREDITED', 'time': dt};
+                patch['referralCodes/$referredBy/referrals/$uid/status'] = 'SUCCESS';
+                patch['referralCodes/$referredBy/referrals/$uid/reward'] = 5;
+                patch['referralCodes/$referredBy/referrals/$uid/paidAt'] = DateTime.now().millisecondsSinceEpoch;
                 patch['users/$uid/referralPaid'] = true;
               }
             }
@@ -1990,7 +2012,26 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(child: Text('Successful referrals: $_referralCount', style: const TextStyle(color: Colors.white70, fontSize: 12))),
             Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
           ]),
-          if (_referredBy.isNotEmpty) const Text('Referral linked to your account.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          if (_referredBy.isNotEmpty) const Text('Referral linked to your account. Your inviter reward is processed after your first ₹20+ deposit is approved.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          const Divider(height: 18),
+          const Text('REFERRAL HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+          const SizedBox(height: 6),
+          if (_referralHistory.isEmpty)
+            const Text('Abhi koi referral nahi hai.', style: TextStyle(fontSize: 12, color: Colors.white70))
+          else
+            ..._referralHistory.map((entry) {
+              final success = (entry['status'] ?? 'PENDING').toString() == 'SUCCESS';
+              final created = DateTime.fromMillisecondsSinceEpoch(_num(entry['createdAt']));
+              final date = created.millisecondsSinceEpoch > 0 ? '${created.day.toString().padLeft(2, '0')}/${created.month.toString().padLeft(2, '0')}/${created.year}' : 'Date unavailable';
+              return ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(success ? Icons.check_circle : Icons.hourglass_top, color: success ? const Color(0xFF00E676) : Colors.orange),
+                title: Text((entry['ign'] ?? 'Player').toString()),
+                subtitle: Text('$date • ${success ? 'Deposit approved' : 'Waiting for first ₹20+ approved deposit'}'),
+                trailing: Text(success ? '+₹${_num(entry['reward'])}' : 'PENDING', style: TextStyle(fontWeight: FontWeight.bold, color: success ? const Color(0xFF00E676) : Colors.orange, fontSize: 11)),
+              );
+            }),
         ]),
       ),
     );
