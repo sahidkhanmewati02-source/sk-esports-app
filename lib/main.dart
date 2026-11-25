@@ -464,7 +464,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0, _wallet = 0;
   Map<String, dynamic> _rewards = {};
   List _rewardHistory = [];
-  String _lastRewardsWriteError = 'No Firebase response captured';
   int _referralCount = 0, _referralEarnings = 0;
   String _referralCode = '', _referredBy = '';
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
@@ -479,13 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _superAdminUid = '';
   DateTime _clock = DateTime.now();
   Timer? _matchTicker;
-  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [], _pendingRewardClaims = [];
-  int? _scratchRewardPreview, _spinRewardPreview;
-  int _rewardPanel = 0;
-  int _scratchGestureCount = 0;
-  int _spinLandingNumber = 1;
-  double _spinRotation = 0, _spinPreviousRotation = 0;
-  bool _scratchBusy = false, _spinBusy = false;
+  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [];
   String _rulesText = 'BGMI Level 30+ ID required.\nRoom ID & Password match se 15 minute pehle milega.\nChat mein abuse, spam aur personal details share na karein.\nEntry fee aur withdrawal ke liye sahi UTR/UPI details dein.';
   final _chatC = TextEditingController(), _aboutLinksC = TextEditingController(), _rulesC = TextEditingController();
   final _upiC = TextEditingController(), _qrC = TextEditingController();
@@ -516,40 +509,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _msg(String s) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
   int _num(dynamic v) => int.tryParse('$v') ?? 0;
-
-  // Refresh the Firebase ID token before rewards REST calls. The app uses
-  // Firebase Identity Toolkit REST auth, so the refresh token is stored in
-  // SharedPreferences rather than FirebaseAuth.currentUser.
-  Future<String> _freshRewardsIdToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('rt');
-    if (refreshToken == null || refreshToken.isEmpty) {
-      throw Exception('Session expired. Please log in again.');
-    }
-    final response = await http.post(
-      Uri.parse('https://securetoken.googleapis.com/v1/token?key=$kApiKey'),
-      headers: const {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: {
-        'grant_type': 'refresh_token',
-        'refresh_token': refreshToken,
-      },
-    ).timeout(const Duration(seconds: 12));
-    if (response.statusCode != 200) {
-      debugPrint('[SK ESPORTS] Firebase token refresh failed: HTTP ${response.statusCode}');
-      throw Exception('Session refresh failed. Please log in again.');
-    }
-    final data = jsonDecode(response.body);
-    final token = (data['id_token'] ?? '').toString();
-    final returnedUid = (data['user_id'] ?? '').toString();
-    final rotatedRefreshToken = (data['refresh_token'] ?? '').toString();
-    if (token.isEmpty || returnedUid != widget.uid) {
-      throw Exception('Session validation failed. Please log in again.');
-    }
-    if (rotatedRefreshToken.isNotEmpty) {
-      await prefs.setString('rt', rotatedRefreshToken);
-    }
-    return token;
-  }
 
   int _matchStartTimestamp(Map m) {
     final direct = _num(m['startAt'] ?? m['startTime'] ?? m['scheduledAt']);
@@ -704,7 +663,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _wallet = _num(d['wallet']);
         _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
         _rewardHistory = d['rewardHistory'] is Map
-            ? ((d['rewardHistory'] as Map).entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'id': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()..sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a))))
+            ? (d['rewardHistory'] as Map).entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'id': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()..sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)))
             : <dynamic>[];
         _referralCode = (d['referralCode'] ?? widget.uid).toString();
         _referralCount = _num(d['referralCount']);
@@ -712,8 +671,24 @@ class _HomeScreenState extends State<HomeScreen> {
         _referredBy = (d['referredBy'] ?? '').toString();
         if (_rewards.isEmpty) {
           await _ensureRewards();
+        } else if (!_rewards.containsKey('discountsUsed') ||
+            !_rewards.containsKey('discountMatchId') ||
+            !_rewards.containsKey('discountAmount') ||
+            !_rewards.containsKey('rewardDayKey') ||
+            !_rewards.containsKey('rewardDayStart')) {
+          final migrated = Map<String, dynamic>.from(_rewards);
+          migrated['discountsUsed'] = migrated['discountsUsed'] is Map ? migrated['discountsUsed'] : <String, dynamic>{'_init': false};
+          migrated['discountMatchId'] = migrated['discountMatchId'] ?? '';
+          migrated['discountAmount'] = migrated['discountAmount'] ?? 0;
+          migrated['rewardDayKey'] = _currentRewardDayKey();
+          migrated['rewardDayStart'] = _currentRewardDayStart();
+          migrated['watchCount'] = 0;
+          migrated['streakClaimed'] = false;
+          migrated['dailyBonusClaimed'] = false;
+          migrated['updatedAt'] = {'.sv': 'timestamp'};
+          await _putRewards(migrated);
         }
-        // Scratch/Spin counters reset from their own IST day key; do not run the legacy Watch & Earn reset.
+        await _resetRewardsForNewIstDay();
         if (d['referralCode'] == null) {
           await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(widget.uid));
         }
@@ -828,17 +803,6 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
         _users = usrs;
-        _pendingRewardClaims = [];
-        for (final user in usrs) {
-          final rd = user['rewards'];
-          final pending = rd is Map ? rd['pendingClaims'] : null;
-          if (pending is Map) pending.forEach((claimId, value) {
-            if (value is Map && (value['status'] ?? 'PENDING') == 'PENDING') {
-              _pendingRewardClaims.add({...Map<String, dynamic>.from(value), 'claimId': claimId.toString(), 'uid': user['uid'].toString(), 'ign': (user['ign'] ?? 'Player').toString(), 'bgmiId': (user['bgmiId'] ?? '').toString()});
-            }
-          });
-        }
-        _pendingRewardClaims.sort((a,b) => _num(b['createdAt']).compareTo(_num(a['createdAt'])));
       } else {
         final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
         final chats = <Map>[];
@@ -1226,21 +1190,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       _msg('Match complete mark nahi hua. Firebase Rules check karein.');
     }
-  }
-
-  Widget _pendingRewardApprovalsCard() {
-    if (!isAdmin) return const SizedBox.shrink();
-    return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [const Expanded(child: Text('PENDING SCRATCH / SPIN APPROVALS', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold))), Text('${_pendingRewardClaims.length}')]),
-      if (_pendingRewardClaims.isEmpty)
-        const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('No pending reward claims.'))
-      else
-        ..._pendingRewardClaims.map((claim) => ListTile(contentPadding: EdgeInsets.zero, dense: true,
-          title: Text('${claim['ign']} • +${claim['amount']} coins'),
-          subtitle: Text('${claim['type']} • BGMI: ${claim['bgmiId']}\\nUID: ${claim['uid']}'),
-          trailing: ElevatedButton(onPressed: () => _approvePendingReward(claim), child: const Text('Approve')),
-        )),
-    ])));
   }
 
   Widget _adminQuickActions() {
@@ -1996,7 +1945,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       nextRewards['discountMatchId'] = matchId;
                       nextRewards['discountAmount'] = discount;
                       nextRewards['bonusWallet'] = oldBonus - discount;
-                      nextRewards['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
+                      nextRewards['updatedAt'] = {'.sv': 'timestamp'};
                       if (!await _putRewards(nextRewards)) {
                         return _msg('Bonus discount reserve nahi hua. Main Wallet se payment nahi li gayi.');
                       }
@@ -2048,10 +1997,8 @@ class _HomeScreenState extends State<HomeScreen> {
       'discountsUsed': <String, dynamic>{'_init': false},
       'updatedAt': {'.sv': 'timestamp'},
     };
-    final idToken = await _freshRewardsIdToken();
     final res = await http.put(
-      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
-      headers: const {'Content-Type': 'application/json'},
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
       body: jsonEncode(initial),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -2063,31 +2010,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<bool> _putRewards(Map<String, dynamic> value) async {
+    final res = await http.put(
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+      body: jsonEncode(value),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) return false;
     try {
-      final idToken = await _freshRewardsIdToken();
-      final res = await http.put(
-        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
-        headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
-        body: jsonEncode(value),
-      );
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        _lastRewardsWriteError = 'HTTP ${res.statusCode}: ${res.body}';
-        debugPrint('[SK ESPORTS] Rewards PUT rejected: ${_lastRewardsWriteError}');
-        return false;
-      }
-      try {
-        final saved = jsonDecode(res.body);
-        if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
-        else _rewards = value;
-      } catch (_) { _rewards = value; }
-      _lastRewardsWriteError = '';
-      if (mounted) setState(() {});
-      return true;
-    } catch (error, stackTrace) {
-      _lastRewardsWriteError = 'Network/client exception: $error';
-      debugPrint('[SK ESPORTS] Rewards PUT exception: ${_lastRewardsWriteError}\n$stackTrace');
-      return false;
-    }
+      final saved = jsonDecode(res.body);
+      if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
+      else _rewards = value;
+    } catch (_) { _rewards = value; }
+    if (mounted) setState(() {});
+    return true;
   }
 
   String _currentRewardDayKey() {
@@ -2105,142 +2039,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<bool> _resetRewardsForNewIstDay() async {
-    try {
-      final idToken = await _freshRewardsIdToken();
-      // RTDB's /.info/serverTimeOffset is an SDK-only path and may return
-      // HTTP 400 through the REST API. Retry briefly, then safely fall back
-      // to the device's UTC clock instead of blocking Rewards & Earn.
-      DateTime serverNow = DateTime.now().toUtc();
-      var gotServerOffset = false;
-      for (var attempt = 0; attempt < 2; attempt++) {
-        try {
-          final offsetRes = await http
-              .get(Uri.parse('$kDbUrl/.info/serverTimeOffset.json'))
-              .timeout(const Duration(seconds: 3));
-          if (offsetRes.statusCode == 200) {
-            final offsetValue = jsonDecode(offsetRes.body);
-            if (offsetValue is num) {
-              serverNow = DateTime.fromMillisecondsSinceEpoch(
-                DateTime.now().millisecondsSinceEpoch + offsetValue.toInt(),
-                isUtc: true,
-              );
-              gotServerOffset = true;
-              break;
-            }
-          } else {
-            debugPrint('[SK ESPORTS] Server offset endpoint unavailable '
-                '(HTTP ${offsetRes.statusCode}); using safe clock fallback.');
-            // HTTP 400 from the REST-only /.info path is not recoverable by
-            // repeating the same request, so continue with local UTC time.
-            if (offsetRes.statusCode >= 400 && offsetRes.statusCode < 500) break;
-          }
-        } catch (error) {
-          debugPrint('[SK ESPORTS] Server offset attempt ${attempt + 1} failed: $error');
-        }
-        if (attempt == 0) {
-          await Future<void>.delayed(const Duration(milliseconds: 350));
-        }
-      }
-      if (!gotServerOffset) {
-        serverNow = DateTime.now().toUtc();
-        debugPrint('[SK ESPORTS] Using device UTC clock for daily reward reset.');
-      }
-
-      final ist = serverNow.add(const Duration(hours: 5, minutes: 30));
-      final rewardDay = ist.hour < 5 ? ist.subtract(const Duration(days: 1)) : ist;
-      final today = '${rewardDay.year.toString().padLeft(4, '0')}-${rewardDay.month.toString().padLeft(2, '0')}-${rewardDay.day.toString().padLeft(2, '0')}';
-      final dayStart = DateTime.utc(rewardDay.year, rewardDay.month, rewardDay.day)
-          .millisecondsSinceEpoch - const Duration(minutes: 30).inMilliseconds;
-
-      // Always refresh the rewards node before deciding whether a reset is
-      // needed. The screen cache can be stale after login, app resume, or an
-      // ad callback; attempting a reset from that stale snapshot can trigger
-      // a needless permission-denied write even when Firebase is already on
-      // today's reward day. This GET does not modify any wallet or reward data.
-      final latestRes = await http.get(Uri.parse(
-        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}',
-      )).timeout(const Duration(seconds: 10));
-      if (latestRes.statusCode < 200 || latestRes.statusCode >= 300) {
-        _lastRewardsWriteError =
-            'Reward refresh HTTP ${latestRes.statusCode}: ${latestRes.body}';
-        debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
-        return false;
-      }
-      if (latestRes.body == 'null') {
-        _lastRewardsWriteError = 'Rewards node missing; safe reset not attempted.';
-        return false;
-      }
-      final latestValue = jsonDecode(latestRes.body);
-      if (latestValue is! Map) {
-        _lastRewardsWriteError = 'Rewards data format invalid; safe reset not attempted.';
-        return false;
-      }
-      _rewards = Map<String, dynamic>.from(latestValue);
-
-      if (_rewards['rewardDayKey'] == today &&
-          _num(_rewards['rewardDayStart']) == dayStart) {
-        _lastRewardsWriteError = '';
-        return true;
-      }
-
-      // PATCH only reset fields. Never PUT a stale full rewards snapshot:
-      // current coins and bonusWallet remain untouched during daily reset.
-      final patch = <String, dynamic>{
-        'rewardDayKey': today,
-        'rewardDayStart': dayStart,
-        'watchCount': 0,
-        'streakDay': _num(_rewards['streakDay']).clamp(0, 7),
-        'streakClaimed': false,
-        'dailyBonusClaimed': false,
-        'updatedAt': serverNow.millisecondsSinceEpoch,
-      };
-
-      // Fill only missing legacy fields; never overwrite existing balances.
-      if (!_rewards.containsKey('coins')) patch['coins'] = 0;
-      if (!_rewards.containsKey('bonusWallet')) patch['bonusWallet'] = 0;
-      if (!_rewards.containsKey('windowStart')) {
-        patch['windowStart'] = serverNow.millisecondsSinceEpoch;
-      }
-      if (!_rewards.containsKey('discountMatchId')) patch['discountMatchId'] = '';
-      if (!_rewards.containsKey('discountAmount')) patch['discountAmount'] = 0;
-      if (_rewards['discountsUsed'] is! Map) {
-        patch['discountsUsed'] = <String, dynamic>{'_init': false};
-      }
-
-      final res = await http.patch(
-        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
-        headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
-        body: jsonEncode(patch),
-      );
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        _lastRewardsWriteError = 'HTTP ${res.statusCode}: ${res.body}';
-        debugPrint('[SK ESPORTS] Daily reset PATCH rejected: $_lastRewardsWriteError');
-        return false;
-      }
-
-      final verify = await http.get(Uri.parse(
-        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}',
-      ));
-      if (verify.statusCode != 200 || verify.body == 'null') {
-        _lastRewardsWriteError = 'Reset saved but verification read failed (HTTP ${verify.statusCode})';
-        return false;
-      }
-      final value = jsonDecode(verify.body);
-      if (value is Map) _rewards = Map<String, dynamic>.from(value);
-      if (_rewards['rewardDayKey'] == today &&
-          _num(_rewards['rewardDayStart']) == dayStart) {
-        _lastRewardsWriteError = '';
-        if (mounted) setState(() {});
-        return true;
-      }
-      _lastRewardsWriteError = 'Reset verification failed: reward day did not match';
-      debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
-      return false;
-    } catch (error, stackTrace) {
-      _lastRewardsWriteError = 'Network/client exception: $error';
-      debugPrint('[SK ESPORTS] Daily reset exception: $_lastRewardsWriteError\\n$stackTrace');
-      return false;
-    }
+    final today = _currentRewardDayKey();
+    if (_rewards['rewardDayKey'] == today && _num(_rewards['rewardDayStart']) == _currentRewardDayStart()) return true;
+    final next = Map<String, dynamic>.from(_rewards);
+    next['rewardDayKey'] = today;
+    next['rewardDayStart'] = _currentRewardDayStart();
+    next['watchCount'] = 0;
+    next['streakClaimed'] = false;
+    next['dailyBonusClaimed'] = false;
+    next['updatedAt'] = {'.sv': 'timestamp'};
+    return await _putRewards(next);
   }
 
   Future<void> _startRewardCooldown() async {
@@ -2253,21 +2061,16 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<bool> _showUnityRewardedAd({bool enforceCooldown = true}) async {
+  Future<bool> _showUnityRewardedAd() async {
     if (_rewardAdBusy) return false;
-    // Use the requested Unity test configuration when remote settings are blank.
-    final gameId = _unityGameId.trim().isEmpty ? '800451347' : _unityGameId.trim();
-    final placementId = _unityRewardedPlacementId.trim().isEmpty
-        ? 'BP_Rewarded_Android'
-        : _unityRewardedPlacementId.trim();
-    if (_unityTestMode) {
-      debugPrint('[SK ESPORTS] Unity test mode ON; gameId=$gameId placementId=$placementId');
+    if (_unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty) {
+      _msg('Unity Ads Game ID aur Rewarded Placement ID Admin Settings mein set karein.');
+      return false;
     }
-    if (enforceCooldown) {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final lastFinished = prefs.getInt('unity_reward_last_finished_at') ?? 0;
-        if (lastFinished > 0) {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastFinished = prefs.getInt('unity_reward_last_finished_at') ?? 0;
+      if (lastFinished > 0) {
         final allowedAt = DateTime.fromMillisecondsSinceEpoch(lastFinished).add(const Duration(seconds: 5));
         if (DateTime.now().isBefore(allowedAt)) {
           _rewardCooldownUntil = allowedAt;
@@ -2275,10 +2078,9 @@ class _HomeScreenState extends State<HomeScreen> {
           _msg('Agla rewarded ad 5 seconds baad available hoga.');
           return false;
         }
-        }
-      } catch (_) {}
-    }
-    if (mounted) setState(() => _rewardAdBusy = true);
+      }
+    } catch (_) {}
+    setState(() => _rewardAdBusy = true);
     var adStarted = false;
     var cooldownMarked = false;
     Future<void> markCooldownOnce() async {
@@ -2290,50 +2092,33 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!await UnityAds.isInitialized()) {
         final initialized = Completer<void>();
         await UnityAds.init(
-          gameId: gameId,
+          gameId: _unityGameId.trim(),
           testMode: _unityTestMode,
           onComplete: () { if (!initialized.isCompleted) initialized.complete(); },
           onFailed: (error, message) { if (!initialized.isCompleted) initialized.completeError(Exception('Unity Ads init failed: $message')); },
         );
         await initialized.future.timeout(const Duration(seconds: 30));
       }
-      Object? lastLoadError;
-      var adLoaded = false;
-      for (var loadAttempt = 1; loadAttempt <= 2 && !adLoaded; loadAttempt++) {
-        try {
-          final loaded = Completer<void>();
-          await UnityAds.load(placementId: placementId,
-            onComplete: (_) { if (!loaded.isCompleted) loaded.complete(); },
-            onFailed: (_, error, message) { if (!loaded.isCompleted) loaded.completeError(Exception('Unity rewarded ad load failed: $message')); });
-          await loaded.future.timeout(const Duration(seconds: 35));
-          adLoaded = true;
-        } catch (loadError) {
-          lastLoadError = loadError;
-          debugPrint('[SK ESPORTS] Rewarded ad load attempt $loadAttempt failed: $loadError');
-          if (loadAttempt < 2) await Future<void>.delayed(const Duration(seconds: 2));
-        }
-      }
-      if (!adLoaded) throw Exception('Ad abhi load nahi hua. Thodi der baad dobara try karein. $lastLoadError');
+      final loaded = Completer<void>();
+      await UnityAds.load(
+        placementId: _unityRewardedPlacementId.trim(),
+        onComplete: (_) { if (!loaded.isCompleted) loaded.complete(); },
+        onFailed: (_, error, message) { if (!loaded.isCompleted) loaded.completeError(Exception('Unity rewarded ad load failed: $message')); },
+      );
+      await loaded.future.timeout(const Duration(seconds: 45));
       final finished = Completer<bool>();
       await UnityAds.showVideoAd(
-        placementId: placementId,
-        onStart: (id) { adStarted = true; debugPrint('[SK ESPORTS] Unity ad started: $id'); },
-        onSkipped: (id) { debugPrint('[SK ESPORTS] Unity ad skipped: $id'); markCooldownOnce(); if (!finished.isCompleted) finished.complete(false); },
-        onComplete: (id) { debugPrint('[SK ESPORTS] Unity rewarded ad completed: $id'); markCooldownOnce(); if (!finished.isCompleted) finished.complete(true); },
-        onFailed: (id, error, message) {
-          debugPrint('[SK ESPORTS] Unity ad failed: $id $error $message');
+        placementId: _unityRewardedPlacementId.trim(),
+        onStart: (_) { adStarted = true; },
+        onSkipped: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(false); },
+        onComplete: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(true); },
+        onFailed: (_, error, message) {
           markCooldownOnce();
           if (!finished.isCompleted) finished.complete(false);
           if (mounted) _msg('Unity Ads show failed: $message');
         },
       );
-      final completed = await finished.future.timeout(
-        const Duration(minutes: 3),
-        onTimeout: () {
-          debugPrint('[SK ESPORTS] Unity rewarded callback timeout for $placementId');
-          return false;
-        },
-      );
+      final completed = await finished.future.timeout(const Duration(minutes: 3), onTimeout: () => false);
       if (completed) return true;
       _msg('Ad complete nahi hua; reward coins add nahi hue.');
       return false;
@@ -2342,161 +2127,80 @@ class _HomeScreenState extends State<HomeScreen> {
       _msg(error.toString().replaceFirst('Exception: ', ''));
       return false;
     } finally {
-      _rewardAdBusy = false;
-      if (mounted) setState(() {});
-      // Preload the next rewarded ad after the current video closes.
-      Future<void>.delayed(const Duration(milliseconds: 700), () async {
-        try {
-          if (!await UnityAds.isInitialized()) return;
-          await UnityAds.load(
-            placementId: placementId,
-            onComplete: (_) => debugPrint('[SK ESPORTS] Next rewarded ad preloaded.'),
-            onFailed: (_, error, message) => debugPrint('[SK ESPORTS] Next ad preload failed: $message'),
-          );
-        } catch (error) {
-          debugPrint('[SK ESPORTS] Next ad preload exception: $error');
-        }
-      });
+      if (mounted) setState(() => _rewardAdBusy = false);
     }
   }
 
-  int _weightedScratchSpinCoins() {
-    const weighted = [5, 5, 5, 5, 5, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 12];
-    return weighted[math.Random.secure().nextInt(weighted.length)];
+  Future<void> _startUnityReward(String kind) async {
+    if (_rewardAdBusy) return;
+    final completed = await _showUnityRewardedAd();
+    if (completed && mounted) await _claimReward(kind);
   }
 
-  Future<void> _revealScratchCard({VoidCallback? onChanged}) async {
-    if (_scratchBusy || _rewardAdBusy || _scratchRewardPreview != null) return;
-    final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
-    if ((sameDay ? _num(_rewards['scratchCount']) : 0) >= 10) return _msg('Aaj ke 10 Scratch Cards complete ho gaye. Reset 5:00 AM IST par hoga.');
-    setState(() { _scratchRewardPreview = _weightedScratchSpinCoins(); _scratchGestureCount = 0; });
-    onChanged?.call();
-  }
-
-  Future<void> _revealSpin({VoidCallback? onChanged}) async {
-    if (_spinBusy || _rewardAdBusy || _spinRewardPreview != null) return;
-    final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
-    if ((sameDay ? _num(_rewards['spinCount']) : 0) >= 10) return _msg('Aaj ke 10 Spins complete ho gaye. Reset 5:00 AM IST par hoga.');
-    const sectorRewards = [5, 7, 8, 5, 7, 8, 5, 7, 8, 8, 8, 12];
-    final sector = math.Random.secure().nextInt(sectorRewards.length);
-    final reward = sectorRewards[sector];
-    final step = (2 * math.pi) / 12;
-    final centerAngle = -math.pi / 2 + (sector + 0.5) * step;
-    final alignToPointer = (-math.pi / 2 - centerAngle) % (2 * math.pi);
-    setState(() {
-      _spinBusy = true;
-      _spinLandingNumber = sector + 1;
-      _spinPreviousRotation = _spinRotation;
-      _spinRotation += (math.pi * 12) + alignToPointer;
+  Future<void> _claimReward(String kind) async {
+    if (_rewards.isEmpty) await _ensureRewards();
+    if (!await _resetRewardsForNewIstDay()) return _msg('Daily reset save nahi hua. Rewards Refresh karke dobara try karein.');
+    final current = Map<String, dynamic>.from(_rewards);
+    final next = Map<String, dynamic>.from(current);
+    var reward = 0;
+    String title;
+    if (kind == 'watch') {
+      if (_num(current['watchCount']) >= 20) return _msg('Aaj ke 20 Watch & Earn claims complete ho gaye. Reset 5:00 AM IST par hoga.');
+      next['watchCount'] = _num(current['watchCount']) + 1;
+      reward = 10;
+      title = 'Watch & Earn';
+    } else if (kind == 'streak') {
+      if (current['streakClaimed'] == true) return _msg('Daily Streak aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
+      final day = (_num(current['streakDay']) % 7) + 1;
+      const payouts = [10, 15, 20, 25, 30, 35, 40];
+      reward = payouts[day - 1];
+      next['streakDay'] = day;
+      next['streakClaimed'] = true;
+      title = 'Daily Streak • Day $day';
+    } else if (kind == 'daily') {
+      if (current['dailyBonusClaimed'] == true) return _msg('Daily Bonus aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
+      reward = math.Random.secure().nextInt(20) + 1;
+      next['dailyBonusClaimed'] = true;
+      title = 'Daily Bonus';
+    } else {
+      return;
+    }
+    final dayKey = _currentRewardDayKey();
+    final dayStart = _currentRewardDayStart();
+    next['rewardDayKey'] = dayKey;
+    next['rewardDayStart'] = dayStart;
+    next['coins'] = _num(current['coins']) + reward;
+    next['updatedAt'] = {'.sv': 'timestamp'};
+    final historyId = DateTime.now().microsecondsSinceEpoch.toString();
+    final history = <String, dynamic>{
+      'type': kind,
+      'title': title,
+      'coins': reward,
+      'watchCount': _num(next['watchCount']),
+      'streakDay': _num(next['streakDay']),
+      'rewardDayKey': dayKey,
+      'createdAt': {'.sv': 'timestamp'},
+    };
+    final patch = <String, dynamic>{
+      'users/${widget.uid}/rewards': next,
+      'users/${widget.uid}/rewardHistory/$historyId': history,
+    };
+    final res = await http.patch(
+      Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
+      body: jsonEncode(patch),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      return _msg('Reward save fail (${res.statusCode}): ${res.body}');
+    }
+    _rewards = next;
+    _rewardHistory.insert(0, {
+      'id': historyId,
+      ...history,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
     });
-    onChanged?.call();
-    await Future<void>.delayed(const Duration(milliseconds: 1900));
-    if (mounted) { setState(() { _spinRewardPreview = reward; _spinBusy = false; }); onChanged?.call(); }
-  }
-
-  Future<void> _claimScratchOrSpin(String kind, {VoidCallback? onChanged}) async {
-    final isScratch = kind == 'scratch';
-    final reward = isScratch ? _scratchRewardPreview : _spinRewardPreview;
-    if (reward == null) return _msg('Pehle ${isScratch ? 'Scratch Card' : 'Spin'} complete karein.');
-    if (_rewardAdBusy || (isScratch ? _scratchBusy : _spinBusy)) return;
-    if (mounted) setState(() { if (isScratch) { _scratchBusy = true; } else { _spinBusy = true; } });
-    onChanged?.call();
-    try {
-      final adCompleted = await _showUnityRewardedAd(enforceCooldown: true);
-      if (!adCompleted || !mounted) return;
-      final idToken = await _freshRewardsIdToken();
-      final getRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}')).timeout(const Duration(seconds: 12));
-      if (getRes.statusCode != 200) throw Exception('Reward data refresh nahi hua (HTTP ${getRes.statusCode}).');
-      final current = getRes.body == 'null' ? <String, dynamic>{} : Map<String, dynamic>.from(jsonDecode(getRes.body) as Map);
-      final today = _currentRewardDayKey();
-      final sameDay = current['scratchSpinDayKey'] == today;
-      final scratchCount = sameDay ? _num(current['scratchCount']) : 0;
-      final spinCount = sameDay ? _num(current['spinCount']) : 0;
-      if (isScratch && scratchCount >= 10) throw Exception('Aaj ke 10 Scratch Cards complete ho gaye.');
-      if (!isScratch && spinCount >= 10) throw Exception('Aaj ke 10 Spins complete ho gaye.');
-      final claimId = DateTime.now().microsecondsSinceEpoch.toString();
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final claim = {'type': isScratch ? 'SCRATCH' : 'SPIN', 'amount': reward, 'status': 'PENDING', 'createdAt': now, 'dayKey': today};
-      final patch = <String, dynamic>{
-        'scratchSpinDayKey': today, 'scratchSpinDayStart': _currentRewardDayStart(),
-        'scratchCount': scratchCount + (isScratch ? 1 : 0),
-        'spinCount': spinCount + (isScratch ? 0 : 1),
-        'pendingClaims/$claimId': claim, 'updatedAt': now,
-      };
-      final saveRes = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
-        headers: const {'Content-Type': 'application/json'}, body: jsonEncode(patch)).timeout(const Duration(seconds: 12));
-      if (saveRes.statusCode < 200 || saveRes.statusCode >= 300) {
-        debugPrint('[SK ESPORTS] Pending claim save failed: HTTP ${saveRes.statusCode} - ${saveRes.body}');
-        throw Exception('Pending reward save nahi hua (HTTP ${saveRes.statusCode}): ${saveRes.body}');
-      }
-      current['scratchSpinDayKey'] = today; current['scratchSpinDayStart'] = _currentRewardDayStart();
-      current['scratchCount'] = scratchCount + (isScratch ? 1 : 0);
-      current['spinCount'] = spinCount + (isScratch ? 0 : 1);
-      final pending = current['pendingClaims'] is Map ? Map<String, dynamic>.from(current['pendingClaims']) : <String, dynamic>{};
-      pending[claimId] = claim; current['pendingClaims'] = pending; current['updatedAt'] = now;
-      _rewards = current;
-      if (isScratch) { _scratchRewardPreview = null; } else { _spinRewardPreview = null; }
-      if (mounted) setState(() {});
-      onChanged?.call();
-      _msg('Reward ${reward} coins Pending mein save ho gaya.');
-    } catch (error) {
-      _msg(error.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() { _scratchBusy = false; _spinBusy = false; });
-      onChanged?.call();
-    }
-  }
-
-  Future<void> _approvePendingReward(Map claim) async {
-    if (!isAdmin) return;
-    final uid = (claim['uid'] ?? '').toString();
-    final claimId = (claim['claimId'] ?? '').toString();
-    if (uid.isEmpty || claimId.isEmpty) return _msg('Pending claim details missing.');
-    try {
-      final idToken = await _freshRewardsIdToken();
-      final uri = Uri.parse('$kDbUrl/users/$uid/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}');
-      var approved = false;
-      for (var attempt = 0; attempt < 3 && !approved; attempt++) {
-        // Firebase ETag + If-Match prevents duplicate approvals.
-        final getRes = await http.get(uri, headers: const {'X-Firebase-ETag': 'true'}).timeout(const Duration(seconds: 12));
-        if (getRes.statusCode != 200 || getRes.body == 'null') throw Exception('Player rewards data read nahi hua.');
-        final etag = getRes.headers['etag'];
-        if (etag == null || etag.isEmpty) throw Exception('Firebase approval ETag nahi mila.');
-        final data = Map<String, dynamic>.from(jsonDecode(getRes.body) as Map);
-        final pending = data['pendingClaims'] is Map
-            ? Map<String, dynamic>.from(data['pendingClaims'])
-            : <String, dynamic>{};
-        final item = pending[claimId];
-        if (item is! Map || item['status'] != 'PENDING') throw Exception('Ye claim already process ho chuka hai.');
-        final amount = _num(item['amount']);
-        if (amount < 1 || amount > 12) throw Exception('Invalid pending reward amount.');
-        final now = DateTime.now().millisecondsSinceEpoch;
-        final updatedItem = Map<String, dynamic>.from(item);
-        updatedItem['status'] = 'APPROVED';
-        updatedItem['approvedAt'] = now;
-        updatedItem['approvedBy'] = widget.uid;
-        pending[claimId] = updatedItem;
-        data['pendingClaims'] = pending;
-        data['bonusWallet'] = _num(data['bonusWallet']) + amount;
-        data['updatedAt'] = now;
-        final putRes = await http.put(uri,
-          headers: {'Content-Type': 'application/json', 'if-match': etag},
-          body: jsonEncode(data)).timeout(const Duration(seconds: 12));
-        if (putRes.statusCode == 412) continue;
-        if (putRes.statusCode < 200 || putRes.statusCode >= 300) {
-          throw Exception('Approve save nahi hua (HTTP ${putRes.statusCode}). Rules update required ho sakte hain.');
-        }
-        approved = true;
-        if (mounted) setState(() => _pendingRewardClaims.removeWhere(
-          (x) => x['uid'].toString() == uid && x['claimId'].toString() == claimId,
-        ));
-        _msg('$amount coins ka reward approve ho gaya aur Bonus Wallet mein add ho gaya.');
-      }
-      if (!approved) throw Exception('Reward kisi aur admin ne update kiya. Pending list refresh karein.');
-      await _sync();
-    } catch (error) {
-      _msg(error.toString().replaceFirst('Exception: ', ''));
-    }
+    _rewardHistory.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
+    if (mounted) setState(() {});
+    _msg('Mubarak! $reward coins Bonus Wallet rewards mein add hue.');
   }
 
   Future<void> _exchangeCoins() async {
@@ -2506,7 +2210,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final next = Map<String, dynamic>.from(_rewards);
     next['coins'] = coins - (rupees * 100);
     next['bonusWallet'] = _num(_rewards['bonusWallet']) + rupees;
-    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
+    next['updatedAt'] = {'.sv': 'timestamp'};
     if (!await _putRewards(next)) {
       return _msg('Coin Exchange Rules ne reject kiya. Refresh karke try karein.');
     }
@@ -2538,154 +2242,85 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _rewardsCard({VoidCallback? onChanged}) {
-    final coins = _num(_rewards['coins']), bonus = _num(_rewards['bonusWallet']);
-    final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
-    final scratchCount = sameDay ? _num(_rewards['scratchCount']) : 0;
-    final spinCount = sameDay ? _num(_rewards['spinCount']) : 0;
-    final pendingMap = _rewards['pendingClaims'] is Map
-        ? Map<String, dynamic>.from(_rewards['pendingClaims'])
-        : <String, dynamic>{};
-    final myPending = pendingMap.values.where((v) => v is Map && v['status'] == 'PENDING').length;
-    final busy = _rewardAdBusy || _scratchBusy || _spinBusy;
-    const pendingMessage = 'Ad complete hone ke baad claim Pending mein save hoga. Admin/Co-Admin approval ke baad coins Bonus Wallet mein add honge.';
+    final coins = _num(_rewards['coins']);
+    final bonus = _num(_rewards['bonusWallet']);
+    final watched = _num(_rewards['watchCount']);
+    final streak = _num(_rewards['streakDay']);
+    final unityConfigMissing = _unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty;
+    final rewardDayMatches = _rewards['rewardDayKey'] == _currentRewardDayKey();
+    final cooldown = _rewardCooldownUntil.difference(_clock);
+    final cooldownActive = cooldown.inSeconds > 0;
+    final streakDone = rewardDayMatches && _rewards['streakClaimed'] == true;
+    final dailyDone = rewardDayMatches && _rewards['dailyBonusClaimed'] == true;
+    final displayWatched = rewardDayMatches ? watched : 0;
+    final cooldownLabel = cooldownActive
+        ? '${cooldown.inHours.toString().padLeft(2, '0')}:${(cooldown.inMinutes % 60).toString().padLeft(2, '0')}:${(cooldown.inSeconds % 60).toString().padLeft(2, '0')}'
+        : '';
+    // 20 Watch + 1 Streak + 1 Daily Bonus; reset at 05:00 IST.
+    final watchBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || (rewardDayMatches && watched >= 20);
+    final streakBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || streakDone;
+    final dailyBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || dailyDone;
+    String rewardReason(String kind) {
+      if (unityConfigMissing) return 'Unity Ads Game ID / Rewarded Placement ID Admin Settings mein set karein.';
+      if (_rewardAdBusy) return 'Unity rewarded ad chal raha hai...';
+      if (cooldownActive) return 'Agla rewarded ad ${cooldown.inSeconds + 1} seconds baad available hoga.';
+      if (kind == 'watch' && rewardDayMatches && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset 5:00 AM IST par hoga.';
+      if (kind == 'streak' && streakDone) return 'Daily Streak claimed. Reset 5:00 AM IST par hoga.';
+      if (kind == 'daily' && dailyDone) return 'Daily Bonus claimed. Reset 5:00 AM IST par hoga.';
+      return '';
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            const Expanded(child: Text('REWARDS & EARN', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
+            const Expanded(child: Text('BONUS REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
             Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold)),
           ]),
-          const SizedBox(height: 5),
-          Text('Bonus Wallet: ₹$bonus  •  Pending claims: $myPending',
-              style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
-          const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.',
-              style: TextStyle(fontSize: 11, color: Colors.grey)),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(
-              onPressed: busy ? null : () { setState(() => _rewardPanel = 0); onChanged?.call(); },
-              icon: const Icon(Icons.redeem),
-              label: const Text('SCRATCH CARD'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _rewardPanel == 0 ? Colors.black : const Color(0xFFFFB300),
-                backgroundColor: _rewardPanel == 0 ? const Color(0xFFFFB300) : Colors.transparent,
-              ),
-            )),
-            const SizedBox(width: 8),
-            Expanded(child: OutlinedButton.icon(
-              onPressed: busy ? null : () { setState(() => _rewardPanel = 1); onChanged?.call(); },
-              icon: const Icon(Icons.casino),
-              label: const Text('SPIN WHEEL'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _rewardPanel == 1 ? Colors.black : const Color(0xFFFFB300),
-                backgroundColor: _rewardPanel == 1 ? const Color(0xFFFFB300) : Colors.transparent,
-              ),
-            )),
+          const SizedBox(height: 4),
+          Text('Bonus Wallet: ₹$bonus  •  Non-withdrawable', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
+          const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            OutlinedButton(
+              onPressed: watchBlocked ? null : () async { await _startUnityReward('watch'); onChanged?.call(); },
+              child: Text('Watch & Earn ($displayWatched/20)'),
+            ),
+            OutlinedButton(
+              onPressed: streakBlocked ? null : () async { await _startUnityReward('streak'); onChanged?.call(); },
+              child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
+            ),
+            OutlinedButton(
+              onPressed: dailyBlocked ? null : () async { await _startUnityReward('daily'); onChanged?.call(); },
+              child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
+            ),
+            ElevatedButton(
+              onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+              child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
+            ),
           ]),
-          const SizedBox(height: 10),
-          if (_rewardPanel == 0)
-            Card(color: const Color(0xFF202936), child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(children: [
-                const Text('SCRATCH CARD', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-                Text('Daily: $scratchCount/10', style: const TextStyle(color: Colors.white70)),
-                const SizedBox(height: 8),
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _revealScratchCard(onChanged: onChanged),
-                  onPanStart: (_) => _revealScratchCard(onChanged: onChanged),
-                  onPanUpdate: (_) {
-                    if (_scratchRewardPreview == null) _revealScratchCard(onChanged: onChanged);
-                  },
-                  child: Container(
-                    height: 118, width: double.infinity,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      gradient: const LinearGradient(colors: [Color(0xFFFFB300), Color(0xFFFF6F00), Color(0xFF8D3B00)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                      border: Border.all(color: const Color(0xFFFFD54F), width: 2),
-                      boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 4))],
-                    ),
-                    child: Center(child: _scratchRewardPreview == null
-                      ? const Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.touch_app, size: 32, color: Colors.white),
-                          SizedBox(height: 5),
-                          Text('RUB HERE TO SCRATCH', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
-                          Text('Tap or drag to reveal', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        ])
-                      : Column(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.stars, color: Colors.white, size: 30),
-                          Text('$_scratchRewardPreview COINS', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 25)),
-                          const Text('Reward revealed!', style: TextStyle(color: Colors.white70)),
-                        ]),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(width: double.infinity, child: ElevatedButton(
-                  onPressed: _scratchRewardPreview == null || busy || scratchCount >= 10
-                      ? null : () => _claimScratchOrSpin('scratch', onChanged: onChanged),
-                  child: Text(_scratchBusy || _rewardAdBusy ? 'PLEASE WAIT...' : 'CLAIM • WATCH AD'),
-                )),
-              ]),
-            ))
-          else
-            Card(color: const Color(0xFF202936), child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(children: [
-                const Text('SPIN WHEEL', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-                Text('Daily: $spinCount/10', style: const TextStyle(color: Colors.white70)),
-                const SizedBox(height: 8),
-                SizedBox(height: 174, child: Stack(alignment: Alignment.topCenter, children: [
-                  Padding(padding: const EdgeInsets.only(top: 10), child: TweenAnimationBuilder<double>(
-                    key: ValueKey(_spinRotation),
-                    tween: Tween<double>(begin: _spinPreviousRotation, end: _spinRotation),
-                    duration: const Duration(milliseconds: 1900),
-                    curve: Curves.easeOutCubic,
-                    builder: (_, angle, child) => Transform.rotate(angle: angle, child: child),
-                    child: CustomPaint(size: const Size(148, 148), painter: _RewardWheelPainter()),
-                  )),
-                  const Icon(Icons.arrow_drop_down, size: 42, color: Colors.white),
-                ])),
-                Text(_spinRewardPreview == null
-                    ? (_spinBusy ? 'Spinning...' : 'Tap SPIN NOW')
-                    : 'Number $_spinLandingNumber → $_spinRewardPreview COINS',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                SizedBox(width: double.infinity, child: ElevatedButton(
-                  onPressed: spinCount >= 10 || busy || _spinRewardPreview != null
-                      ? null : () => _revealSpin(onChanged: onChanged),
-                  child: Text(_spinBusy ? 'SPINNING...' : 'SPIN NOW'),
-                )),
-                SizedBox(width: double.infinity, child: ElevatedButton(
-                  onPressed: _spinRewardPreview == null || busy || spinCount >= 10
-                      ? null : () => _claimScratchOrSpin('spin', onChanged: onChanged),
-                  child: Text(_rewardAdBusy || _spinBusy ? 'PLEASE WAIT...' : 'CLAIM • WATCH AD'),
-                )),
-              ]),
-            )),
-          const SizedBox(height: 8),
-          Text(pendingMessage, style: const TextStyle(fontSize: 11, color: Colors.amber)),
-          const SizedBox(height: 8),
-          SizedBox(width: double.infinity, child: ElevatedButton(
-            onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null,
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
-            child: const Text('Exchange Existing Coins', style: TextStyle(color: Colors.black)),
-          )),
-          if (coins < 100) const Text('Exchange ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          if (unityConfigMissing || _rewardAdBusy || cooldownActive)
+            Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber))
+          else ...[
+            if (watchBlocked) Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+            if (streakBlocked) Text(rewardReason('streak'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+            if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
+          ],
+          if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
           if (_rewardHistory.isNotEmpty) ...[
             const Divider(height: 18),
-            const Text('REWARD HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+            const Text('REWARD CLAIM HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
             ..._rewardHistory.take(10).map((entry) => ListTile(
-              dense: true, contentPadding: EdgeInsets.zero,
+              dense: true,
+              contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.stars, color: Color(0xFFFF9800), size: 18),
               title: Text('${entry['title'] ?? 'Reward'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
               subtitle: Text(_formatHistoryDateTime(entry), style: const TextStyle(fontSize: 10, color: Colors.grey)),
               trailing: Text('+ ${entry['coins'] ?? 0} coins', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
             )),
           ],
-          const Text('Maximum 10 Scratch Cards + 10 Spins daily. Reset 5:00 AM IST.',
-              style: TextStyle(fontSize: 10, color: Colors.grey)),
+          const Text('20 Watch & Earn + 1 Daily Streak + 1 Daily Bonus = max 22 rewarded ads/day. Reset daily 5:00 AM IST par hota hai. Unity Ads duration Unity decide karta hai; har ad ke baad 5-second cooldown hai. Firebase Spark client-only setup ad views/reward claims ko fully tamper-proof nahi bana sakta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
     );
@@ -3382,7 +3017,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _chatPage(),
       if (isAdmin)
         ListView(padding: const EdgeInsets.all(14), children: [
-          _pendingRewardApprovalsCard(),
           if (isSuperAdmin) ...[
 
           ],
@@ -3502,49 +3136,4 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-}
-
-class _RewardWheelPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    const colors = [
-      Color(0xFFFF9800), Color(0xFF00C853), Color(0xFF2196F3),
-      Color(0xFFE91E63), Color(0xFFFFC107), Color(0xFF7C4DFF),
-      Color(0xFF00BCD4), Color(0xFFFF5722), Color(0xFF8BC34A),
-      Color(0xFF3F51B5), Color(0xFFE91E63), Color(0xFF795548),
-    ];
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width, size.height) / 2;
-    final rect = Rect.fromCircle(center: center, radius: radius - 2);
-    const sweep = (2 * math.pi) / 12;
-    final paint = Paint()..style = PaintingStyle.fill;
-    for (var i = 0; i < 12; i++) {
-      final start = -math.pi / 2 + i * sweep;
-      paint.color = colors[i];
-      canvas.drawArc(rect, start, sweep, true, paint);
-      final angle = start + sweep / 2;
-      final point = Offset(center.dx + math.cos(angle) * radius * 0.70,
-          center.dy + math.sin(angle) * radius * 0.70);
-      final tp = TextPainter(
-        text: TextSpan(text: '${i + 1}', style: const TextStyle(
-          color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900,
-          shadows: [Shadow(color: Colors.black87, blurRadius: 3)],
-        )),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      canvas.save();
-      canvas.translate(point.dx, point.dy);
-      canvas.rotate(angle + math.pi / 2);
-      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
-      canvas.restore();
-      canvas.drawLine(center, Offset(center.dx + math.cos(start) * radius,
-          center.dy + math.sin(start) * radius),
-          Paint()..color = Colors.white..strokeWidth = 1.5);
-    }
-    canvas.drawCircle(center, 18, Paint()..color = const Color(0xFF161B22));
-    canvas.drawCircle(center, 18, Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 2);
-  }
-
-  @override
-  bool shouldRepaint(covariant _RewardWheelPainter oldDelegate) => false;
 }
