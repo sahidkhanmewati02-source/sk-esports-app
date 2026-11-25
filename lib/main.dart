@@ -2122,8 +2122,36 @@ class _HomeScreenState extends State<HomeScreen> {
       final dayStart = DateTime.utc(rewardDay.year, rewardDay.month, rewardDay.day)
           .millisecondsSinceEpoch - const Duration(minutes: 30).inMilliseconds;
 
+      // Always refresh the rewards node before deciding whether a reset is
+      // needed. The screen cache can be stale after login, app resume, or an
+      // ad callback; attempting a reset from that stale snapshot can trigger
+      // a needless permission-denied write even when Firebase is already on
+      // today's reward day. This GET does not modify any wallet or reward data.
+      final latestRes = await http.get(Uri.parse(
+        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}',
+      )).timeout(const Duration(seconds: 10));
+      if (latestRes.statusCode < 200 || latestRes.statusCode >= 300) {
+        _lastRewardsWriteError =
+            'Reward refresh HTTP ${latestRes.statusCode}: ${latestRes.body}';
+        debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
+        return false;
+      }
+      if (latestRes.body == 'null') {
+        _lastRewardsWriteError = 'Rewards node missing; safe reset not attempted.';
+        return false;
+      }
+      final latestValue = jsonDecode(latestRes.body);
+      if (latestValue is! Map) {
+        _lastRewardsWriteError = 'Rewards data format invalid; safe reset not attempted.';
+        return false;
+      }
+      _rewards = Map<String, dynamic>.from(latestValue);
+
       if (_rewards['rewardDayKey'] == today &&
-          _num(_rewards['rewardDayStart']) == dayStart) return true;
+          _num(_rewards['rewardDayStart']) == dayStart) {
+        _lastRewardsWriteError = '';
+        return true;
+      }
 
       // PATCH only reset fields. Never PUT a stale full rewards snapshot:
       // current coins and bonusWallet remain untouched during daily reset.
