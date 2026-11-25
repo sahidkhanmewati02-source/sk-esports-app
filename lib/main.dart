@@ -2342,6 +2342,19 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       _rewardAdBusy = false;
       if (mounted) setState(() {});
+      // Preload the next rewarded ad after the current video closes.
+      Future<void>.delayed(const Duration(milliseconds: 700), () async {
+        try {
+          if (!await UnityAds.isInitialized()) return;
+          await UnityAds.load(
+            placementId: placementId,
+            onComplete: (_) => debugPrint('[SK ESPORTS] Next rewarded ad preloaded.'),
+            onFailed: (_, error, message) => debugPrint('[SK ESPORTS] Next ad preload failed: $message'),
+          );
+        } catch (error) {
+          debugPrint('[SK ESPORTS] Next ad preload exception: $error');
+        }
+      });
     }
   }
 
