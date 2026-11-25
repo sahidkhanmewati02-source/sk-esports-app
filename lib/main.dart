@@ -672,23 +672,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _referredBy = (d['referredBy'] ?? '').toString();
         if (_rewards.isEmpty) {
           await _ensureRewards();
-        } else if (!_rewards.containsKey('discountsUsed') ||
-            !_rewards.containsKey('discountMatchId') ||
-            !_rewards.containsKey('discountAmount') ||
-            !_rewards.containsKey('rewardDayKey') ||
-            !_rewards.containsKey('rewardDayStart')) {
-          final migrated = Map<String, dynamic>.from(_rewards);
-          migrated['discountsUsed'] = migrated['discountsUsed'] is Map ? migrated['discountsUsed'] : <String, dynamic>{'_init': false};
-          migrated['discountMatchId'] = migrated['discountMatchId'] ?? '';
-          migrated['discountAmount'] = migrated['discountAmount'] ?? 0;
-          migrated['rewardDayKey'] = _currentRewardDayKey();
-          migrated['rewardDayStart'] = _currentRewardDayStart();
-          migrated['watchCount'] = 0;
-          migrated['streakClaimed'] = false;
-          migrated['dailyBonusClaimed'] = false;
-          migrated['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
-          await _putRewards(migrated);
         }
+        // One canonical migration/reset path; failures are logged but do not break
+        // the rest of the user's app refresh.
         await _resetRewardsForNewIstDay();
         if (d['referralCode'] == null) {
           await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(widget.uid));
@@ -1999,7 +1985,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'updatedAt': {'.sv': 'timestamp'},
     };
     final res = await http.put(
-      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}'),
       body: jsonEncode(initial),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -2053,27 +2039,50 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<bool> _resetRewardsForNewIstDay() async {
     final today = _currentRewardDayKey();
-    if (_rewards['rewardDayKey'] == today && _num(_rewards['rewardDayStart']) == _currentRewardDayStart()) return true;
+    final dayStart = _currentRewardDayStart();
+    if (_rewards['rewardDayKey'] == today &&
+        _num(_rewards['rewardDayStart']) == dayStart) return true;
+
+    // Preserve balances exactly; only daily counters/flags are reset.
     final next = Map<String, dynamic>.from(_rewards);
-    // Normalize legacy reward records before the daily reset PUT.
-    next['coins'] = _num(next['coins']);
-    next['bonusWallet'] = _num(next['bonusWallet']);
-    next['windowStart'] = _num(next['windowStart']) > 0 ? _num(next['windowStart']) : DateTime.now().millisecondsSinceEpoch;
+    next['coins'] = _num(_rewards['coins']);
+    next['bonusWallet'] = _num(_rewards['bonusWallet']);
+    next['windowStart'] = _num(_rewards['windowStart']) > 0
+        ? _num(_rewards['windowStart'])
+        : <String, dynamic>{'.sv': 'timestamp'};
     next['rewardDayKey'] = today;
-    next['rewardDayStart'] = _currentRewardDayStart();
+    next['rewardDayStart'] = dayStart;
     next['watchCount'] = 0;
-    next['streakDay'] = _num(next['streakDay']);
+    next['streakDay'] = _num(_rewards['streakDay']).clamp(0, 7);
     next['streakClaimed'] = false;
     next['dailyBonusClaimed'] = false;
-    next['discountMatchId'] = next['discountMatchId']?.toString() ?? '';
-    next['discountAmount'] = _num(next['discountAmount']);
-    next['discountsUsed'] = next['discountsUsed'] is Map
-        ? Map<String, dynamic>.from(next['discountsUsed'] as Map)
+    next['discountMatchId'] = _rewards['discountMatchId']?.toString() ?? '';
+    next['discountAmount'] = _num(_rewards['discountAmount']);
+    next['discountsUsed'] = _rewards['discountsUsed'] is Map
+        ? Map<String, dynamic>.from(_rewards['discountsUsed'] as Map)
         : <String, dynamic>{'_init': false};
-    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
+    next['updatedAt'] = <String, dynamic>{'.sv': 'timestamp'};
+
     final saved = await _putRewards(next);
     if (!saved) {
-      debugPrint('[SK ESPORTS] Daily reset failed. dayKey=$today dayStart=${next['rewardDayStart']} lastError=$_lastRewardsWriteError');
+      // Re-read once in case another device completed the reset concurrently.
+      try {
+        final fresh = await http.get(Uri.parse(
+          '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}',
+        ));
+        if (fresh.statusCode == 200 && fresh.body != 'null') {
+          final value = jsonDecode(fresh.body);
+          if (value is Map) _rewards = Map<String, dynamic>.from(value);
+          if (_rewards['rewardDayKey'] == today &&
+              _num(_rewards['rewardDayStart']) == dayStart) {
+            _lastRewardsWriteError = '';
+            return true;
+          }
+        }
+      } catch (error) {
+        debugPrint('[SK ESPORTS] Rewards reset verification failed: $error');
+      }
+      debugPrint('[SK ESPORTS] Daily reset failed. uid=${widget.uid} dayKey=$today dayStart=$dayStart error=$_lastRewardsWriteError');
     }
     return saved;
   }
