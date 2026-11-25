@@ -2425,7 +2425,10 @@ class _HomeScreenState extends State<HomeScreen> {
       };
       final saveRes = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
         headers: const {'Content-Type': 'application/json'}, body: jsonEncode(patch)).timeout(const Duration(seconds: 12));
-      if (saveRes.statusCode < 200 || saveRes.statusCode >= 300) throw Exception('Pending reward save nahi hua (HTTP ${saveRes.statusCode}). Rules update required ho sakte hain.');
+      if (saveRes.statusCode < 200 || saveRes.statusCode >= 300) {
+        debugPrint('[SK ESPORTS] Pending claim save failed: HTTP ${saveRes.statusCode} - ${saveRes.body}');
+        throw Exception('Pending reward save nahi hua (HTTP ${saveRes.statusCode}): ${saveRes.body}');
+      }
       current['scratchSpinDayKey'] = today; current['scratchSpinDayStart'] = _currentRewardDayStart();
       current['scratchCount'] = scratchCount + (isScratch ? 1 : 0);
       current['spinCount'] = spinCount + (isScratch ? 0 : 1);
