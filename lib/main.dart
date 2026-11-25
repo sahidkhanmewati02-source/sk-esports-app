@@ -2049,7 +2049,7 @@ class _HomeScreenState extends State<HomeScreen> {
     next['bonusWallet'] = _num(_rewards['bonusWallet']);
     next['windowStart'] = _num(_rewards['windowStart']) > 0
         ? _num(_rewards['windowStart'])
-        : <String, dynamic>{'.sv': 'timestamp'};
+        : DateTime.now().millisecondsSinceEpoch;
     next['rewardDayKey'] = today;
     next['rewardDayStart'] = dayStart;
     next['watchCount'] = 0;
@@ -2061,7 +2061,8 @@ class _HomeScreenState extends State<HomeScreen> {
     next['discountsUsed'] = _rewards['discountsUsed'] is Map
         ? Map<String, dynamic>.from(_rewards['discountsUsed'] as Map)
         : <String, dynamic>{'_init': false};
-    next['updatedAt'] = <String, dynamic>{'.sv': 'timestamp'};
+    // Rules validate updatedAt as a positive number; send numeric epoch ms.
+    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
 
     final saved = await _putRewards(next);
     if (!saved) {
