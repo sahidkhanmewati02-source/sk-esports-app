@@ -479,7 +479,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _superAdminUid = '';
   DateTime _clock = DateTime.now();
   Timer? _matchTicker;
-  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [];
+  List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [], _pendingRewardClaims = [];
+  int? _scratchRewardPreview, _spinRewardPreview;
+  bool _scratchBusy = false, _spinBusy = false;
   String _rulesText = 'BGMI Level 30+ ID required.\nRoom ID & Password match se 15 minute pehle milega.\nChat mein abuse, spam aur personal details share na karein.\nEntry fee aur withdrawal ke liye sahi UTR/UPI details dein.';
   final _chatC = TextEditingController(), _aboutLinksC = TextEditingController(), _rulesC = TextEditingController();
   final _upiC = TextEditingController(), _qrC = TextEditingController();
@@ -824,6 +826,17 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
         _users = usrs;
+        _pendingRewardClaims = [];
+        for (final user in usrs) {
+          final rd = user['rewards'];
+          final pending = rd is Map ? rd['pendingClaims'] : null;
+          if (pending is Map) pending.forEach((claimId, value) {
+            if (value is Map && (value['status'] ?? 'PENDING') == 'PENDING') {
+              _pendingRewardClaims.add({...Map<String, dynamic>.from(value), 'claimId': claimId.toString(), 'uid': user['uid'].toString(), 'ign': (user['ign'] ?? 'Player').toString(), 'bgmiId': (user['bgmiId'] ?? '').toString()});
+            }
+          });
+        }
+        _pendingRewardClaims.sort((a,b) => _num(b['createdAt']).compareTo(_num(a['createdAt'])));
       } else {
         final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
         final chats = <Map>[];
@@ -1211,6 +1224,21 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       _msg('Match complete mark nahi hua. Firebase Rules check karein.');
     }
+  }
+
+  Widget _pendingRewardApprovalsCard() {
+    if (!isAdmin) return const SizedBox.shrink();
+    return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [const Expanded(child: Text('PENDING SCRATCH / SPIN APPROVALS', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold))), Text('${_pendingRewardClaims.length}')]),
+      if (_pendingRewardClaims.isEmpty)
+        const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('No pending reward claims.'))
+      else
+        ..._pendingRewardClaims.map((claim) => ListTile(contentPadding: EdgeInsets.zero, dense: true,
+          title: Text('${claim['ign']} • +${claim['amount']} coins'),
+          subtitle: Text('${claim['type']} • BGMI: ${claim['bgmiId']}\\nUID: ${claim['uid']}'),
+          trailing: ElevatedButton(onPressed: () => _approvePendingReward(claim), child: const Text('Approve')),
+        )),
+    ])));
   }
 
   Widget _adminQuickActions() {
@@ -2267,13 +2295,23 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         await initialized.future.timeout(const Duration(seconds: 30));
       }
-      final loaded = Completer<void>();
-      await UnityAds.load(
-        placementId: placementId,
-        onComplete: (_) { if (!loaded.isCompleted) loaded.complete(); },
-        onFailed: (_, error, message) { if (!loaded.isCompleted) loaded.completeError(Exception('Unity rewarded ad load failed: $message')); },
-      );
-      await loaded.future.timeout(const Duration(seconds: 45));
+      Object? lastLoadError;
+      var adLoaded = false;
+      for (var loadAttempt = 1; loadAttempt <= 2 && !adLoaded; loadAttempt++) {
+        try {
+          final loaded = Completer<void>();
+          await UnityAds.load(placementId: placementId,
+            onComplete: (_) { if (!loaded.isCompleted) loaded.complete(); },
+            onFailed: (_, error, message) { if (!loaded.isCompleted) loaded.completeError(Exception('Unity rewarded ad load failed: $message')); });
+          await loaded.future.timeout(const Duration(seconds: 35));
+          adLoaded = true;
+        } catch (loadError) {
+          lastLoadError = loadError;
+          debugPrint('[SK ESPORTS] Rewarded ad load attempt $loadAttempt failed: $loadError');
+          if (loadAttempt < 2) await Future<void>.delayed(const Duration(seconds: 2));
+        }
+      }
+      if (!adLoaded) throw Exception('Ad abhi load nahi hua. Thodi der baad dobara try karein. $lastLoadError');
       final finished = Completer<bool>();
       await UnityAds.showVideoAd(
         placementId: placementId,
@@ -2307,120 +2345,101 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _startUnityReward(String kind) async {
-    if (_rewardAdBusy) return;
-    final completed = await _showUnityRewardedAd(enforceCooldown: kind == 'watch');
-    if (completed && mounted) await _claimReward(kind);
+  int _weightedScratchSpinCoins() {
+    const weighted = [5, 5, 5, 7, 7, 7, 8, 8, 8, 12];
+    return weighted[math.Random.secure().nextInt(weighted.length)];
   }
 
-  Future<void> _claimReward(String kind) async {
-    if (_rewards.isEmpty) await _ensureRewards();
-    if (!await _resetRewardsForNewIstDay()) {
-      final detail = _lastRewardsWriteError.isEmpty
-          ? 'Unknown reset failure. Check internet and refresh.'
-          : _lastRewardsWriteError;
-      debugPrint('[SK ESPORTS] Daily reset failed; exact cause: $detail');
-      // Do not label every 401/403 as an expired login. RTDB also returns
-      // permission-denied when a database rule rejects an otherwise valid
-      // Firebase ID token. Show the actual response so the failing rule/path
-      // can be corrected without asking users to log out repeatedly.
-      final readable = detail.length > 180 ? detail.substring(0, 180) : detail;
-      return _msg('Reward reset error: $readable');
-    }
-    final current = Map<String, dynamic>.from(_rewards);
-    final next = Map<String, dynamic>.from(current);
-    var reward = 0;
-    String title;
-    if (kind == 'watch') {
-      if (_num(current['watchCount']) >= 20) return _msg('Aaj ke 20 Watch & Earn claims complete ho gaye. Reset 5:00 AM IST par hoga.');
-      next['watchCount'] = _num(current['watchCount']) + 1;
-      reward = 10;
-      title = 'Watch & Earn';
-    } else if (kind == 'streak') {
-      if (current['streakClaimed'] == true) return _msg('Daily Streak aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
-      final day = (_num(current['streakDay']) % 7) + 1;
-      const payouts = [10, 15, 20, 25, 30, 35, 40];
-      reward = payouts[day - 1];
-      next['streakDay'] = day;
-      next['streakClaimed'] = true;
-      title = 'Daily Streak • Day $day';
-    } else if (kind == 'daily') {
-      if (current['dailyBonusClaimed'] == true) return _msg('Daily Bonus aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
-      reward = math.Random.secure().nextInt(20) + 1;
-      next['dailyBonusClaimed'] = true;
-      title = 'Daily Bonus';
-    } else {
-      return;
-    }
-    // Reuse the day computed from Firebase server time by the reset step.
-    final dayKey = (current['rewardDayKey'] ?? '').toString();
-    final dayStart = _num(current['rewardDayStart']);
-    next['rewardDayKey'] = dayKey;
-    next['rewardDayStart'] = dayStart;
-    next['coins'] = _num(current['coins']) + reward;
-    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
-    final historyId = DateTime.now().microsecondsSinceEpoch.toString();
-    final history = <String, dynamic>{
-      'type': kind,
-      'title': title,
-      'coins': reward,
-      'watchCount': _num(next['watchCount']),
-      'streakDay': _num(next['streakDay']),
-      'rewardDayKey': dayKey,
-      'createdAt': DateTime.now().millisecondsSinceEpoch,
-    };
-    String idToken;
+  Future<void> _revealScratchCard() async {
+    if (_scratchBusy || _rewardAdBusy) return;
+    final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
+    if ((sameDay ? _num(_rewards['scratchCount']) : 0) >= 10) return _msg('Aaj ke 10 Scratch Cards complete ho gaye. Reset 5:00 AM IST par hoga.');
+    setState(() => _scratchRewardPreview = _weightedScratchSpinCoins());
+  }
+
+  Future<void> _revealSpin() async {
+    if (_spinBusy || _rewardAdBusy) return;
+    final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
+    if ((sameDay ? _num(_rewards['spinCount']) : 0) >= 10) return _msg('Aaj ke 10 Spins complete ho gaye. Reset 5:00 AM IST par hoga.');
+    setState(() => _spinRewardPreview = _weightedScratchSpinCoins());
+  }
+
+  Future<void> _claimScratchOrSpin(String kind) async {
+    final isScratch = kind == 'scratch';
+    final reward = isScratch ? _scratchRewardPreview : _spinRewardPreview;
+    if (reward == null) return _msg('Pehle ${isScratch ? 'Scratch Card' : 'Spin'} complete karein.');
+    if (_rewardAdBusy || (isScratch ? _scratchBusy : _spinBusy)) return;
+    if (mounted) setState(() { if (isScratch) { _scratchBusy = true; } else { _spinBusy = true; } });
     try {
-      idToken = await _freshRewardsIdToken();
+      final adCompleted = await _showUnityRewardedAd(enforceCooldown: true);
+      if (!adCompleted || !mounted) return;
+      final idToken = await _freshRewardsIdToken();
+      final getRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}')).timeout(const Duration(seconds: 12));
+      if (getRes.statusCode != 200) throw Exception('Reward data refresh nahi hua (HTTP ${getRes.statusCode}).');
+      final current = getRes.body == 'null' ? <String, dynamic>{} : Map<String, dynamic>.from(jsonDecode(getRes.body) as Map);
+      final today = _currentRewardDayKey();
+      final sameDay = current['scratchSpinDayKey'] == today;
+      final scratchCount = sameDay ? _num(current['scratchCount']) : 0;
+      final spinCount = sameDay ? _num(current['spinCount']) : 0;
+      if (isScratch && scratchCount >= 10) throw Exception('Aaj ke 10 Scratch Cards complete ho gaye.');
+      if (!isScratch && spinCount >= 10) throw Exception('Aaj ke 10 Spins complete ho gaye.');
+      final claimId = DateTime.now().microsecondsSinceEpoch.toString();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final claim = {'type': isScratch ? 'SCRATCH' : 'SPIN', 'amount': reward, 'status': 'PENDING', 'createdAt': now, 'dayKey': today};
+      final patch = <String, dynamic>{
+        'scratchSpinDayKey': today, 'scratchSpinDayStart': _currentRewardDayStart(),
+        'scratchCount': scratchCount + (isScratch ? 1 : 0),
+        'spinCount': spinCount + (isScratch ? 0 : 1),
+        'pendingClaims/$claimId': claim, 'updatedAt': now,
+      };
+      final saveRes = await http.patch(Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
+        headers: const {'Content-Type': 'application/json'}, body: jsonEncode(patch)).timeout(const Duration(seconds: 12));
+      if (saveRes.statusCode < 200 || saveRes.statusCode >= 300) throw Exception('Pending reward save nahi hua (HTTP ${saveRes.statusCode}). Rules update required ho sakte hain.');
+      current['scratchSpinDayKey'] = today; current['scratchSpinDayStart'] = _currentRewardDayStart();
+      current['scratchCount'] = scratchCount + (isScratch ? 1 : 0);
+      current['spinCount'] = spinCount + (isScratch ? 0 : 1);
+      final pending = current['pendingClaims'] is Map ? Map<String, dynamic>.from(current['pendingClaims']) : <String, dynamic>{};
+      pending[claimId] = claim; current['pendingClaims'] = pending; current['updatedAt'] = now;
+      _rewards = current;
+      if (isScratch) { _scratchRewardPreview = null; } else { _spinRewardPreview = null; }
+      if (mounted) setState(() {});
+      _msg('Reward ${reward} coins Pending mein save ho gaya.');
     } catch (error) {
-      debugPrint('[SK ESPORTS] Reward token refresh failed: $error');
-      return _msg('Session refresh nahi hua. Internet check karke dobara login karein.');
+      _msg(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() { _scratchBusy = false; _spinBusy = false; });
     }
+  }
 
-    // IMPORTANT: Write directly to this user's rewards node. A PATCH to
-    // /.json is evaluated at the database root and is blocked by the
-    // admin-only root .write rule, even when child paths have user rules.
-    final rewardsRes = await http.patch(
-      Uri.parse(
-        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}',
-      ),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode(next),
-    );
-    if (rewardsRes.statusCode < 200 || rewardsRes.statusCode >= 300) {
-      _lastRewardsWriteError =
-          'Reward node HTTP ${rewardsRes.statusCode}: ${rewardsRes.body}';
-      debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
-      if (rewardsRes.statusCode == 401 || rewardsRes.statusCode == 403) {
-        return _msg('Firebase ne reward save reject kiya. Rules check required.');
-      }
-      return _msg('Reward save nahi hua. Refresh karke dobara try karein.');
-    }
-
-    // The balance/count is already saved. History is a separate child write
-    // because the root multi-location PATCH is not permitted for players.
-    _rewards = next;
-    _rewardHistory.insert(0, {
-      'id': historyId,
-      ...history,
-      'createdAt': DateTime.now().millisecondsSinceEpoch,
-    });
-    final historyRes = await http.put(
-      Uri.parse(
-        '$kDbUrl/users/${widget.uid}/rewardHistory/$historyId.json?auth=${Uri.encodeQueryComponent(idToken)}',
-      ),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode(history),
-    );
-    if (historyRes.statusCode < 200 || historyRes.statusCode >= 300) {
-      debugPrint(
-        '[SK ESPORTS] Reward paid but history write failed: '
-        'HTTP ${historyRes.statusCode}: ${historyRes.body}',
-      );
-    }
-    _rewardHistory.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
-    if (mounted) setState(() {});
-    _msg('Mubarak! $reward coins Bonus Wallet rewards mein add hue.');
+  Future<void> _approvePendingReward(Map claim) async {
+    if (!isAdmin) return;
+    final uid = (claim['uid'] ?? '').toString(), claimId = (claim['claimId'] ?? '').toString();
+    if (uid.isEmpty || claimId.isEmpty) return _msg('Pending claim details missing.');
+    try {
+      final idToken = await _freshRewardsIdToken();
+      final uri = Uri.parse('$kDbUrl/users/$uid/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}');
+      final getRes = await http.get(uri).timeout(const Duration(seconds: 12));
+      if (getRes.statusCode != 200 || getRes.body == 'null') throw Exception('Player rewards data read nahi hua.');
+      final data = Map<String, dynamic>.from(jsonDecode(getRes.body) as Map);
+      final pending = data['pendingClaims'] is Map ? Map<String, dynamic>.from(data['pendingClaims']) : <String, dynamic>{};
+      final item = pending[claimId];
+      if (item is! Map || item['status'] != 'PENDING') throw Exception('Ye claim already process ho chuka hai.');
+      final amount = _num(item['amount']);
+      if (amount < 1 || amount > 12) throw Exception('Invalid pending reward amount.');
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final patch = <String, dynamic>{
+        'bonusWallet': _num(data['bonusWallet']) + amount,
+        'pendingClaims/$claimId/status': 'APPROVED',
+        'pendingClaims/$claimId/approvedAt': now,
+        'pendingClaims/$claimId/approvedBy': widget.uid,
+        'updatedAt': now,
+      };
+      final saveRes = await http.patch(uri, headers: const {'Content-Type': 'application/json'}, body: jsonEncode(patch)).timeout(const Duration(seconds: 12));
+      if (saveRes.statusCode < 200 || saveRes.statusCode >= 300) throw Exception('Approve save nahi hua (HTTP ${saveRes.statusCode}). Rules update required ho sakte hain.');
+      if (mounted) setState(() => _pendingRewardClaims.removeWhere((x) => x['uid'].toString() == uid && x['claimId'].toString() == claimId));
+      _msg('$amount coins ka reward approve ho gaya aur Bonus Wallet mein add ho gaya.');
+      await _sync();
+    } catch (error) { _msg(error.toString().replaceFirst('Exception: ', '')); }
   }
 
   Future<void> _exchangeCoins() async {
@@ -2462,93 +2481,59 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _rewardsCard({VoidCallback? onChanged}) {
-    final coins = _num(_rewards['coins']);
-    final bonus = _num(_rewards['bonusWallet']);
-    final watched = _num(_rewards['watchCount']);
-    final streak = _num(_rewards['streakDay']);
-    final unityConfigMissing = _unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty;
-    final rewardDayMatches = _rewards['rewardDayKey'] == _currentRewardDayKey();
-    final cooldown = _rewardCooldownUntil.difference(_clock);
-    final cooldownSeconds = cooldown.inMilliseconds > 0 ? (cooldown.inMilliseconds / 1000).ceil() : 0;
-    final cooldownActive = cooldownSeconds > 0;
-    final streakDone = rewardDayMatches && _rewards['streakClaimed'] == true;
-    final dailyDone = rewardDayMatches && _rewards['dailyBonusClaimed'] == true;
-    final displayWatched = rewardDayMatches ? watched : 0;
-    // 20 Watch + 1 Streak + 1 Daily Bonus; reset at 05:00 IST.
-    final watchBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || (rewardDayMatches && watched >= 20);
-    final streakBlocked = unityConfigMissing || streakDone;
-    final dailyBlocked = unityConfigMissing || dailyDone;
-    String rewardReason(String kind) {
-      if (unityConfigMissing) return 'Unity Ads Game ID / Rewarded Placement ID Admin Settings mein set karein.';
-      if (kind == 'watch' && _rewardAdBusy) return 'Unity rewarded ad chal raha hai...';
-      if (kind == 'watch' && cooldownActive) return 'Agla rewarded ad ${cooldownSeconds}s baad available hoga.';
-      if (kind == 'watch' && rewardDayMatches && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset 5:00 AM IST par hoga.';
-      if (kind == 'streak' && streakDone) return 'Daily Streak claimed. Reset 5:00 AM IST par hoga.';
-      if (kind == 'daily' && dailyDone) return 'Daily Bonus claimed. Reset 5:00 AM IST par hoga.';
-      return '';
-    }
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Expanded(child: Text('BONUS REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
-            Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold)),
-          ]),
-          const SizedBox(height: 4),
-          Text('Bonus Wallet: ₹$bonus  •  Non-withdrawable', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
-          const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            Column(mainAxisSize: MainAxisSize.min, children: [
-              if (cooldownActive)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text('Next ad in ${cooldownSeconds}s', style: const TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
-                ),
-              OutlinedButton(
-                onPressed: watchBlocked ? null : () async { await _startUnityReward('watch'); onChanged?.call(); },
-                child: Text(_rewardAdBusy ? 'Ad Playing...' : (cooldownActive ? 'Wait ${cooldownSeconds}s' : 'Watch & Earn ($displayWatched/20)')),
-              ),
-            ]),
-            OutlinedButton(
-              onPressed: streakBlocked ? null : () async { await _startUnityReward('streak'); onChanged?.call(); },
-              child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
-            ),
-            OutlinedButton(
-              onPressed: dailyBlocked ? null : () async { await _startUnityReward('daily'); onChanged?.call(); },
-              child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
-            ),
-            ElevatedButton(
-              onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null,
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
-              child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
-            ),
-          ]),
-          if (unityConfigMissing || _rewardAdBusy || cooldownActive)
-            Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber))
-          else ...[
-            if (watchBlocked) Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-            if (streakBlocked) Text(rewardReason('streak'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-            if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-          ],
-          if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
-          if (_rewardHistory.isNotEmpty) ...[
-            const Divider(height: 18),
-            const Text('REWARD CLAIM HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-            ..._rewardHistory.take(10).map((entry) => ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.stars, color: Color(0xFFFF9800), size: 18),
-              title: Text('${entry['title'] ?? 'Reward'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              subtitle: Text(_formatHistoryDateTime(entry), style: const TextStyle(fontSize: 10, color: Colors.grey)),
-              trailing: Text('+ ${entry['coins'] ?? 0} coins', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
-            )),
-          ],
-          const Text('20 Watch & Earn + 1 Daily Streak + 1 Daily Bonus = max 22 rewarded ads/day. Reset daily 5:00 AM IST par hota hai. Unity Ads duration Unity decide karta hai; har ad ke baad 5-second cooldown hai. Firebase Spark client-only setup ad views/reward claims ko fully tamper-proof nahi bana sakta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+    final coins = _num(_rewards['coins']), bonus = _num(_rewards['bonusWallet']);
+    final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
+    final scratchCount = sameDay ? _num(_rewards['scratchCount']) : 0, spinCount = sameDay ? _num(_rewards['spinCount']) : 0;
+    final pendingMap = _rewards['pendingClaims'] is Map ? Map<String, dynamic>.from(_rewards['pendingClaims']) : <String, dynamic>{};
+    final myPending = pendingMap.values.where((v) => v is Map && v['status'] == 'PENDING').length;
+    final scratchBusy = _scratchBusy || _rewardAdBusy, spinBusy = _spinBusy || _rewardAdBusy;
+    const pendingMessage = 'Abhi Pending hai. Admin isko subah 6 se 7 baje, dopahar 12 se 2 baje, aur shaam 6 se 10 baje ke beech 100% approve kar dega aur ye Bonus Wallet mein add hoga.';
+    return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [const Expanded(child: Text('SCRATCH CARD & SPIN REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))), Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold))]),
+      const SizedBox(height: 4),
+      Text('Bonus Wallet: ₹$bonus • Pending claims: $myPending', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
+      const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+      const SizedBox(height: 12),
+      Card(color: const Color(0xFF202936), child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
+        const Text('SCRATCH CARD', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+        Text('Daily: $scratchCount/10', style: const TextStyle(color: Colors.white70)),
+        const SizedBox(height: 6),
+        Text(_scratchRewardPreview == null ? 'Tap to scratch and reveal coins' : 'You revealed $_scratchRewardPreview coins!', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: scratchCount >= 10 || scratchBusy ? null : () async { await _revealScratchCard(); onChanged?.call(); }, child: const Text('Scratch Now'))),
+          const SizedBox(width: 8),
+          Expanded(child: ElevatedButton(onPressed: _scratchRewardPreview == null || scratchBusy ? null : () async { await _claimScratchOrSpin('scratch'); onChanged?.call(); }, child: Text(_scratchBusy ? 'Loading Ad...' : 'Claim'))),
         ]),
-      ),
-    );
+      ]))),
+      Card(color: const Color(0xFF202936), child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
+        const Text('SPIN WHEEL', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+        Text('Daily: $spinCount/10', style: const TextStyle(color: Colors.white70)),
+        const SizedBox(height: 6),
+        Text(_spinRewardPreview == null ? 'Tap Spin and reveal coins' : 'You won $_spinRewardPreview coins!', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: spinCount >= 10 || spinBusy ? null : () async { await _revealSpin(); onChanged?.call(); }, child: const Text('Spin Now'))),
+          const SizedBox(width: 8),
+          Expanded(child: ElevatedButton(onPressed: _spinRewardPreview == null || spinBusy ? null : () async { await _claimScratchOrSpin('spin'); onChanged?.call(); }, child: Text(_spinBusy ? 'Loading Ad...' : 'Claim'))),
+        ]),
+      ]))),
+      const SizedBox(height: 8),
+      const Text(pendingMessage, style: TextStyle(fontSize: 11, color: Colors.amber)),
+      const SizedBox(height: 8),
+      ElevatedButton(onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)), child: const Text('Exchange Existing Coins', style: TextStyle(color: Colors.black))),
+      if (coins < 100) const Text('Exchange ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+      if (_rewardHistory.isNotEmpty) ...[
+        const Divider(height: 18), const Text('REWARD HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+        ..._rewardHistory.take(10).map((entry) => ListTile(dense: true, contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.stars, color: Color(0xFFFF9800), size: 18),
+          title: Text('${entry['title'] ?? 'Reward'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          subtitle: Text(_formatHistoryDateTime(entry), style: const TextStyle(fontSize: 10, color: Colors.grey)),
+          trailing: Text('+ ${entry['coins'] ?? 0} coins', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+        )),
+      ],
+      const Text('Maximum 10 Scratch Cards + 10 Spins daily. Daily counter reset 5:00 AM IST par hoga.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+    ])));
   }
 
   void _deposit() {
@@ -3242,6 +3227,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _chatPage(),
       if (isAdmin)
         ListView(padding: const EdgeInsets.all(14), children: [
+          _pendingRewardApprovalsCard(),
           if (isSuperAdmin) ...[
 
           ],
