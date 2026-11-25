@@ -2364,14 +2364,15 @@ class _HomeScreenState extends State<HomeScreen> {
     return weighted[math.Random.secure().nextInt(weighted.length)];
   }
 
-  Future<void> _revealScratchCard() async {
+  Future<void> _revealScratchCard({VoidCallback? onChanged}) async {
     if (_scratchBusy || _rewardAdBusy || _scratchRewardPreview != null) return;
     final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
     if ((sameDay ? _num(_rewards['scratchCount']) : 0) >= 10) return _msg('Aaj ke 10 Scratch Cards complete ho gaye. Reset 5:00 AM IST par hoga.');
     setState(() { _scratchRewardPreview = _weightedScratchSpinCoins(); _scratchGestureCount = 0; });
+    onChanged?.call();
   }
 
-  Future<void> _revealSpin() async {
+  Future<void> _revealSpin({VoidCallback? onChanged}) async {
     if (_spinBusy || _rewardAdBusy || _spinRewardPreview != null) return;
     final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
     if ((sameDay ? _num(_rewards['spinCount']) : 0) >= 10) return _msg('Aaj ke 10 Spins complete ho gaye. Reset 5:00 AM IST par hoga.');
@@ -2387,16 +2388,18 @@ class _HomeScreenState extends State<HomeScreen> {
       _spinPreviousRotation = _spinRotation;
       _spinRotation += (math.pi * 12) + alignToPointer;
     });
+    onChanged?.call();
     await Future<void>.delayed(const Duration(milliseconds: 1900));
-    if (mounted) setState(() { _spinRewardPreview = reward; _spinBusy = false; });
+    if (mounted) { setState(() { _spinRewardPreview = reward; _spinBusy = false; }); onChanged?.call(); }
   }
 
-  Future<void> _claimScratchOrSpin(String kind) async {
+  Future<void> _claimScratchOrSpin(String kind, {VoidCallback? onChanged}) async {
     final isScratch = kind == 'scratch';
     final reward = isScratch ? _scratchRewardPreview : _spinRewardPreview;
     if (reward == null) return _msg('Pehle ${isScratch ? 'Scratch Card' : 'Spin'} complete karein.');
     if (_rewardAdBusy || (isScratch ? _scratchBusy : _spinBusy)) return;
     if (mounted) setState(() { if (isScratch) { _scratchBusy = true; } else { _spinBusy = true; } });
+    onChanged?.call();
     try {
       final adCompleted = await _showUnityRewardedAd(enforceCooldown: true);
       if (!adCompleted || !mounted) return;
@@ -2430,11 +2433,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _rewards = current;
       if (isScratch) { _scratchRewardPreview = null; } else { _spinRewardPreview = null; }
       if (mounted) setState(() {});
+      onChanged?.call();
       _msg('Reward ${reward} coins Pending mein save ho gaya.');
     } catch (error) {
       _msg(error.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) setState(() { _scratchBusy = false; _spinBusy = false; });
+      onChanged?.call();
     }
   }
 
@@ -2549,13 +2554,8 @@ class _HomeScreenState extends State<HomeScreen> {
         Text('Daily: $scratchCount/10', style: const TextStyle(color: Colors.white70)),
         const SizedBox(height: 8),
         GestureDetector(
-          onPanUpdate: (_) {
-            if (_scratchRewardPreview != null || scratchBusy || scratchCount >= 10) return;
-            _scratchGestureCount++;
-            if (_scratchGestureCount >= 8) _revealScratchCard();
-          },
-          onTap: _revealScratchCard,
-          onPanStart: (_) => _revealScratchCard(),
+          onPanStart: (_) { _revealScratchCard(onChanged: onChanged); },
+          onTap: () { _revealScratchCard(onChanged: onChanged); },
           child: Container(
             height: 118, width: double.infinity,
             decoration: BoxDecoration(
@@ -2571,7 +2571,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        ElevatedButton(onPressed: _scratchRewardPreview == null || scratchBusy ? null : () async { await _claimScratchOrSpin('scratch'); onChanged?.call(); }, child: Text(_scratchBusy ? 'Loading / Saving...' : 'CLAIM • WATCH AD')),
+        ElevatedButton(onPressed: _scratchRewardPreview == null || scratchBusy ? null : () async { await _claimScratchOrSpin('scratch', onChanged: onChanged); }, child: Text(_scratchBusy ? 'Loading / Saving...' : 'CLAIM • WATCH AD')),
       ]))),
       Card(color: const Color(0xFF202936), child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
         const Text('SPIN WHEEL', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
@@ -2590,8 +2590,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ])),
         Text(_spinRewardPreview == null ? (_spinBusy ? 'Spinning...' : 'Tap SPIN to start') : 'Sector $_spinLandingNumber → $_spinRewardPreview COINS WON!', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        ElevatedButton(onPressed: spinCount >= 10 || spinBusy || _spinRewardPreview != null ? null : _revealSpin, child: Text(spinBusy ? 'SPINNING...' : 'SPIN NOW')),
-        ElevatedButton(onPressed: _spinRewardPreview == null || spinBusy || _rewardAdBusy ? null : () async { await _claimScratchOrSpin('spin'); onChanged?.call(); }, child: Text(_rewardAdBusy ? 'Loading Ad...' : 'CLAIM • WATCH AD')),
+        ElevatedButton(onPressed: spinCount >= 10 || spinBusy || _spinRewardPreview != null ? null : () { _revealSpin(onChanged: onChanged); }, child: Text(spinBusy ? 'SPINNING...' : 'SPIN NOW')),
+        ElevatedButton(onPressed: _spinRewardPreview == null || spinBusy || _rewardAdBusy ? null : () async { await _claimScratchOrSpin('spin', onChanged: onChanged); }, child: Text(_rewardAdBusy ? 'Loading Ad...' : 'CLAIM • WATCH AD')),
       ]))),
       const SizedBox(height: 8),
       Text(pendingMessage, style: const TextStyle(fontSize: 11, color: Colors.amber)),
