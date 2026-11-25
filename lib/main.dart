@@ -481,6 +481,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _matchTicker;
   List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [], _pendingRewardClaims = [];
   int? _scratchRewardPreview, _spinRewardPreview;
+  int _rewardPanel = 0;
   int _scratchGestureCount = 0;
   int _spinLandingNumber = 1;
   double _spinRotation = 0, _spinPreviousRotation = 0;
@@ -2538,77 +2539,153 @@ class _HomeScreenState extends State<HomeScreen> {
     final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
     final scratchCount = sameDay ? _num(_rewards['scratchCount']) : 0;
     final spinCount = sameDay ? _num(_rewards['spinCount']) : 0;
-    final pendingMap = _rewards['pendingClaims'] is Map ? Map<String, dynamic>.from(_rewards['pendingClaims']) : <String, dynamic>{};
+    final pendingMap = _rewards['pendingClaims'] is Map
+        ? Map<String, dynamic>.from(_rewards['pendingClaims'])
+        : <String, dynamic>{};
     final myPending = pendingMap.values.where((v) => v is Map && v['status'] == 'PENDING').length;
-    final scratchBusy = _scratchBusy || _rewardAdBusy;
-    final spinBusy = _spinBusy || _rewardAdBusy;
-    const pendingMessage = 'Ad complete hone ke baad claim Pending mein save hoga. Admin approval ke baad Bonus Wallet mein add hoga.';
-    return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [const Expanded(child: Text('SCRATCH CARD & SPIN REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))), Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold))]),
-      const SizedBox(height: 4),
-      Text('Bonus Wallet: ₹$bonus • Pending claims: $myPending', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
-      const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
-      const SizedBox(height: 12),
-      Card(color: const Color(0xFF202936), child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
-        const Text('SCRATCH CARD', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-        Text('Daily: $scratchCount/10', style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onPanStart: (_) { _revealScratchCard(onChanged: onChanged); },
-          onTap: () { _revealScratchCard(onChanged: onChanged); },
-          child: Container(
-            height: 118, width: double.infinity,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: const LinearGradient(colors: [Color(0xFFFFB300), Color(0xFFFF6F00), Color(0xFF8D3B00)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-              border: Border.all(color: const Color(0xFFFFD54F), width: 2),
-              boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 4))],
-            ),
-            child: Center(child: _scratchRewardPreview == null
-              ? const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.touch_app, size: 32, color: Colors.white), SizedBox(height: 5), Text('RUB HERE TO SCRATCH', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.1)), Text('Tap or rub to reveal', style: TextStyle(color: Colors.white70, fontSize: 11))])
-              : Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.stars, color: Colors.white, size: 30), Text('$_scratchRewardPreview COINS', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 25)), const Text('Reward revealed!', style: TextStyle(color: Colors.white70))]),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        ElevatedButton(onPressed: _scratchRewardPreview == null || scratchBusy ? null : () async { await _claimScratchOrSpin('scratch', onChanged: onChanged); }, child: Text(_scratchBusy ? 'Loading / Saving...' : 'CLAIM • WATCH AD')),
-      ]))),
-      Card(color: const Color(0xFF202936), child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
-        const Text('SPIN WHEEL', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-        Text('Daily: $spinCount/10', style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 8),
-        SizedBox(height: 174, child: Stack(alignment: Alignment.topCenter, children: [
-          Padding(padding: const EdgeInsets.only(top: 10), child: TweenAnimationBuilder<double>(
-            key: ValueKey(_spinRotation),
-            tween: Tween<double>(begin: _spinPreviousRotation, end: _spinRotation),
-            duration: const Duration(milliseconds: 1800),
-            curve: Curves.easeOutCubic,
-            builder: (_, angle, child) => Transform.rotate(angle: angle, child: child),
-            child: CustomPaint(size: const Size(148, 148), painter: _RewardWheelPainter()),
+    final busy = _rewardAdBusy || _scratchBusy || _spinBusy;
+    const pendingMessage = 'Ad complete hone ke baad claim Pending mein save hoga. Admin/Co-Admin approval ke baad coins Bonus Wallet mein add honge.';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(child: Text('REWARDS & EARN', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
+            Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold)),
+          ]),
+          const SizedBox(height: 5),
+          Text('Bonus Wallet: ₹$bonus  •  Pending claims: $myPending',
+              style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
+          const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.',
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              onPressed: busy ? null : () { setState(() => _rewardPanel = 0); onChanged?.call(); },
+              icon: const Icon(Icons.redeem),
+              label: const Text('SCRATCH CARD'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _rewardPanel == 0 ? Colors.black : const Color(0xFFFFB300),
+                backgroundColor: _rewardPanel == 0 ? const Color(0xFFFFB300) : Colors.transparent,
+              ),
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: OutlinedButton.icon(
+              onPressed: busy ? null : () { setState(() => _rewardPanel = 1); onChanged?.call(); },
+              icon: const Icon(Icons.casino),
+              label: const Text('SPIN WHEEL'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _rewardPanel == 1 ? Colors.black : const Color(0xFFFFB300),
+                backgroundColor: _rewardPanel == 1 ? const Color(0xFFFFB300) : Colors.transparent,
+              ),
+            )),
+          ]),
+          const SizedBox(height: 10),
+          if (_rewardPanel == 0)
+            Card(color: const Color(0xFF202936), child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(children: [
+                const Text('SCRATCH CARD', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+                Text('Daily: $scratchCount/10', style: const TextStyle(color: Colors.white70)),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _revealScratchCard(onChanged: onChanged),
+                  onPanStart: (_) => _revealScratchCard(onChanged: onChanged),
+                  onPanUpdate: (_) {
+                    if (_scratchRewardPreview == null) _revealScratchCard(onChanged: onChanged);
+                  },
+                  child: Container(
+                    height: 118, width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      gradient: const LinearGradient(colors: [Color(0xFFFFB300), Color(0xFFFF6F00), Color(0xFF8D3B00)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                      border: Border.all(color: const Color(0xFFFFD54F), width: 2),
+                      boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 4))],
+                    ),
+                    child: Center(child: _scratchRewardPreview == null
+                      ? const Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.touch_app, size: 32, color: Colors.white),
+                          SizedBox(height: 5),
+                          Text('RUB HERE TO SCRATCH', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
+                          Text('Tap or drag to reveal', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                        ])
+                      : Column(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.stars, color: Colors.white, size: 30),
+                          Text('$_scratchRewardPreview COINS', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 25)),
+                          const Text('Reward revealed!', style: TextStyle(color: Colors.white70)),
+                        ]),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(width: double.infinity, child: ElevatedButton(
+                  onPressed: _scratchRewardPreview == null || busy || scratchCount >= 10
+                      ? null : () => _claimScratchOrSpin('scratch', onChanged: onChanged),
+                  child: Text(_scratchBusy || _rewardAdBusy ? 'PLEASE WAIT...' : 'CLAIM • WATCH AD'),
+                )),
+              ]),
+            ))
+          else
+            Card(color: const Color(0xFF202936), child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(children: [
+                const Text('SPIN WHEEL', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+                Text('Daily: $spinCount/10', style: const TextStyle(color: Colors.white70)),
+                const SizedBox(height: 8),
+                SizedBox(height: 174, child: Stack(alignment: Alignment.topCenter, children: [
+                  Padding(padding: const EdgeInsets.only(top: 10), child: TweenAnimationBuilder<double>(
+                    key: ValueKey(_spinRotation),
+                    tween: Tween<double>(begin: _spinPreviousRotation, end: _spinRotation),
+                    duration: const Duration(milliseconds: 1900),
+                    curve: Curves.easeOutCubic,
+                    builder: (_, angle, child) => Transform.rotate(angle: angle, child: child),
+                    child: CustomPaint(size: const Size(148, 148), painter: _RewardWheelPainter()),
+                  )),
+                  const Icon(Icons.arrow_drop_down, size: 42, color: Colors.white),
+                ])),
+                Text(_spinRewardPreview == null
+                    ? (_spinBusy ? 'Spinning...' : 'Tap SPIN NOW')
+                    : 'Number $_spinLandingNumber → $_spinRewardPreview COINS',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                SizedBox(width: double.infinity, child: ElevatedButton(
+                  onPressed: spinCount >= 10 || busy || _spinRewardPreview != null
+                      ? null : () => _revealSpin(onChanged: onChanged),
+                  child: Text(_spinBusy ? 'SPINNING...' : 'SPIN NOW'),
+                )),
+                SizedBox(width: double.infinity, child: ElevatedButton(
+                  onPressed: _spinRewardPreview == null || busy || spinCount >= 10
+                      ? null : () => _claimScratchOrSpin('spin', onChanged: onChanged),
+                  child: Text(_rewardAdBusy || _spinBusy ? 'PLEASE WAIT...' : 'CLAIM • WATCH AD'),
+                )),
+              ]),
+            )),
+          const SizedBox(height: 8),
+          Text(pendingMessage, style: const TextStyle(fontSize: 11, color: Colors.amber)),
+          const SizedBox(height: 8),
+          SizedBox(width: double.infinity, child: ElevatedButton(
+            onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null,
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
+            child: const Text('Exchange Existing Coins', style: TextStyle(color: Colors.black)),
           )),
-          const Icon(Icons.arrow_drop_down, size: 42, color: Colors.white),
-        ])),
-        Text(_spinRewardPreview == null ? (_spinBusy ? 'Spinning...' : 'Tap SPIN to start') : 'Sector $_spinLandingNumber → $_spinRewardPreview COINS WON!', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        ElevatedButton(onPressed: spinCount >= 10 || spinBusy || _spinRewardPreview != null ? null : () { _revealSpin(onChanged: onChanged); }, child: Text(spinBusy ? 'SPINNING...' : 'SPIN NOW')),
-        ElevatedButton(onPressed: _spinRewardPreview == null || spinBusy || _rewardAdBusy ? null : () async { await _claimScratchOrSpin('spin', onChanged: onChanged); }, child: Text(_rewardAdBusy ? 'Loading Ad...' : 'CLAIM • WATCH AD')),
-      ]))),
-      const SizedBox(height: 8),
-      Text(pendingMessage, style: const TextStyle(fontSize: 11, color: Colors.amber)),
-      const SizedBox(height: 8),
-      ElevatedButton(onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)), child: const Text('Exchange Existing Coins', style: TextStyle(color: Colors.black))),
-      if (coins < 100) const Text('Exchange ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
-      if (_rewardHistory.isNotEmpty) ...[
-        const Divider(height: 18), const Text('REWARD HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-        ..._rewardHistory.take(10).map((entry) => ListTile(dense: true, contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.stars, color: Color(0xFFFF9800), size: 18),
-          title: Text('${entry['title'] ?? 'Reward'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-          subtitle: Text(_formatHistoryDateTime(entry), style: const TextStyle(fontSize: 10, color: Colors.grey)),
-          trailing: Text('+ ${entry['coins'] ?? 0} coins', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
-        )),
-      ],
-      const Text('Maximum 10 Scratch Cards + 10 Spins daily. Daily counter reset 5:00 AM IST par hoga.', style: TextStyle(fontSize: 10, color: Colors.grey)),
-    ])));
+          if (coins < 100) const Text('Exchange ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          if (_rewardHistory.isNotEmpty) ...[
+            const Divider(height: 18),
+            const Text('REWARD HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
+            ..._rewardHistory.take(10).map((entry) => ListTile(
+              dense: true, contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.stars, color: Color(0xFFFF9800), size: 18),
+              title: Text('${entry['title'] ?? 'Reward'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              subtitle: Text(_formatHistoryDateTime(entry), style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              trailing: Text('+ ${entry['coins'] ?? 0} coins', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+            )),
+          ],
+          const Text('Maximum 10 Scratch Cards + 10 Spins daily. Reset 5:00 AM IST.',
+              style: TextStyle(fontSize: 10, color: Colors.grey)),
+        ]),
+      ),
+    );
   }
 
   void _deposit() {
