@@ -686,7 +686,7 @@ class _HomeScreenState extends State<HomeScreen> {
           migrated['watchCount'] = 0;
           migrated['streakClaimed'] = false;
           migrated['dailyBonusClaimed'] = false;
-          migrated['updatedAt'] = {'.sv': 'timestamp'};
+          migrated['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
           await _putRewards(migrated);
         }
         await _resetRewardsForNewIstDay();
@@ -2070,7 +2070,7 @@ class _HomeScreenState extends State<HomeScreen> {
     next['discountsUsed'] = next['discountsUsed'] is Map
         ? Map<String, dynamic>.from(next['discountsUsed'] as Map)
         : <String, dynamic>{'_init': false};
-    next['updatedAt'] = {'.sv': 'timestamp'};
+    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
     final saved = await _putRewards(next);
     if (!saved) {
       debugPrint('[SK ESPORTS] Daily reset failed. dayKey=$today dayStart=${next['rewardDayStart']} lastError=$_lastRewardsWriteError');
@@ -2088,7 +2088,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<bool> _showUnityRewardedAd() async {
+  Future<bool> _showUnityRewardedAd({bool enforceCooldown = true}) async {
     if (_rewardAdBusy) return false;
     // Use the requested Unity test configuration when remote settings are blank.
     final gameId = _unityGameId.trim().isEmpty ? '800451347' : _unityGameId.trim();
@@ -2098,10 +2098,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_unityTestMode) {
       debugPrint('[SK ESPORTS] Unity test mode ON; gameId=$gameId placementId=$placementId');
     }
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final lastFinished = prefs.getInt('unity_reward_last_finished_at') ?? 0;
-      if (lastFinished > 0) {
+    if (enforceCooldown) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final lastFinished = prefs.getInt('unity_reward_last_finished_at') ?? 0;
+        if (lastFinished > 0) {
         final allowedAt = DateTime.fromMillisecondsSinceEpoch(lastFinished).add(const Duration(seconds: 5));
         if (DateTime.now().isBefore(allowedAt)) {
           _rewardCooldownUntil = allowedAt;
@@ -2109,9 +2110,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _msg('Agla rewarded ad 5 seconds baad available hoga.');
           return false;
         }
-      }
-    } catch (_) {}
-    setState(() => _rewardAdBusy = true);
+        }
+      } catch (_) {}
+    }
+    if (mounted) setState(() => _rewardAdBusy = true);
     var adStarted = false;
     var cooldownMarked = false;
     Future<void> markCooldownOnce() async {
@@ -2165,13 +2167,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _msg(error.toString().replaceFirst('Exception: ', ''));
       return false;
     } finally {
-      if (mounted) setState(() => _rewardAdBusy = false);
+      _rewardAdBusy = false;
+      if (mounted) setState(() {});
     }
   }
 
   Future<void> _startUnityReward(String kind) async {
     if (_rewardAdBusy) return;
-    final completed = await _showUnityRewardedAd();
+    final completed = await _showUnityRewardedAd(enforceCooldown: kind == 'watch');
     if (completed && mounted) await _claimReward(kind);
   }
 
@@ -2291,21 +2294,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final unityConfigMissing = _unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty;
     final rewardDayMatches = _rewards['rewardDayKey'] == _currentRewardDayKey();
     final cooldown = _rewardCooldownUntil.difference(_clock);
-    final cooldownActive = cooldown.inSeconds > 0;
+    final cooldownSeconds = cooldown.inMilliseconds > 0 ? (cooldown.inMilliseconds / 1000).ceil() : 0;
+    final cooldownActive = cooldownSeconds > 0;
     final streakDone = rewardDayMatches && _rewards['streakClaimed'] == true;
     final dailyDone = rewardDayMatches && _rewards['dailyBonusClaimed'] == true;
     final displayWatched = rewardDayMatches ? watched : 0;
-    final cooldownLabel = cooldownActive
-        ? '${cooldown.inHours.toString().padLeft(2, '0')}:${(cooldown.inMinutes % 60).toString().padLeft(2, '0')}:${(cooldown.inSeconds % 60).toString().padLeft(2, '0')}'
-        : '';
     // 20 Watch + 1 Streak + 1 Daily Bonus; reset at 05:00 IST.
     final watchBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || (rewardDayMatches && watched >= 20);
-    final streakBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || streakDone;
-    final dailyBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || dailyDone;
+    final streakBlocked = unityConfigMissing || streakDone;
+    final dailyBlocked = unityConfigMissing || dailyDone;
     String rewardReason(String kind) {
       if (unityConfigMissing) return 'Unity Ads Game ID / Rewarded Placement ID Admin Settings mein set karein.';
-      if (_rewardAdBusy) return 'Unity rewarded ad chal raha hai...';
-      if (cooldownActive) return 'Agla rewarded ad ${cooldown.inSeconds + 1} seconds baad available hoga.';
+      if (kind == 'watch' && _rewardAdBusy) return 'Unity rewarded ad chal raha hai...';
+      if (kind == 'watch' && cooldownActive) return 'Agla rewarded ad ${cooldownSeconds}s baad available hoga.';
       if (kind == 'watch' && rewardDayMatches && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset 5:00 AM IST par hoga.';
       if (kind == 'streak' && streakDone) return 'Daily Streak claimed. Reset 5:00 AM IST par hoga.';
       if (kind == 'daily' && dailyDone) return 'Daily Bonus claimed. Reset 5:00 AM IST par hoga.';
@@ -2324,10 +2325,17 @@ class _HomeScreenState extends State<HomeScreen> {
           const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
-            OutlinedButton(
-              onPressed: watchBlocked ? null : () async { await _startUnityReward('watch'); onChanged?.call(); },
-              child: Text('Watch & Earn ($displayWatched/20)'),
-            ),
+            Column(mainAxisSize: MainAxisSize.min, children: [
+              if (cooldownActive)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('Next ad in ${cooldownSeconds}s', style: const TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+              OutlinedButton(
+                onPressed: watchBlocked ? null : () async { await _startUnityReward('watch'); onChanged?.call(); },
+                child: Text(_rewardAdBusy ? 'Ad Playing...' : (cooldownActive ? 'Wait ${cooldownSeconds}s' : 'Watch & Earn ($displayWatched/20)')),
+              ),
+            ]),
             OutlinedButton(
               onPressed: streakBlocked ? null : () async { await _startUnityReward('streak'); onChanged?.call(); },
               child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
