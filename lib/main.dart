@@ -711,8 +711,15 @@ class _HomeScreenState extends State<HomeScreen> {
           await _putRewards(migrated);
         }
         if (_referralCode.isEmpty || _referralCode == widget.uid) {
-          _referralCode = await _createUniqueReferralCode(name: _ign, uid: widget.uid, token: widget.token, admin: isSuperAdmin);
-          await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(_referralCode));
+          final generatedCode = await _createUniqueReferralCode(name: _ign, uid: widget.uid, token: widget.token, admin: isSuperAdmin);
+          final profileSave = await http.put(
+            Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'),
+            body: jsonEncode(generatedCode),
+          );
+          if (profileSave.statusCode < 200 || profileSave.statusCode >= 300) {
+            throw Exception('Referral code profile mein save nahi hua. Code dobara generate nahi kiya gaya.');
+          }
+          _referralCode = generatedCode;
         }
         final codeRes = await http.get(Uri.parse('$kDbUrl/referralCodes/${widget.uid}.json?auth=${widget.token}'));
         if (codeRes.statusCode == 200 && codeRes.body == 'null') {
@@ -720,7 +727,13 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         final lookupRes = await http.get(Uri.parse('$kDbUrl/referralLookup/$_referralCode.json?auth=${widget.token}'));
         if (lookupRes.statusCode == 200 && lookupRes.body == 'null') {
-          await http.put(Uri.parse('$kDbUrl/referralLookup/$_referralCode.json?auth=${widget.token}'), body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
+          final mappingSave = await http.put(
+            Uri.parse('$kDbUrl/referralLookup/$_referralCode.json?auth=${widget.token}'),
+            body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}),
+          );
+          if (mappingSave.statusCode < 200 || mappingSave.statusCode >= 300) {
+            _msg('Aapka saved referral code wahi hai, lekin lookup mapping save nahi hui.');
+          }
         }
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
@@ -1795,15 +1808,24 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                       const SizedBox(height: 3),
                                       Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                                      Align(
-                                        alignment: Alignment.centerRight,
-                                        child: TextButton(
-                                          onPressed: () async {
-                                            await _toggleCoAdmin(u);
-                                            if (ctx.mounted) setDialogState(() {});
-                                          },
-                                          child: Text(selectedTab == 1 ? 'Remove' : (isCoAdmin ? 'Remove' : 'Make Co-Admin')),
-                                        ),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.end,
+                                        children: [
+                                          TextButton(
+                                            onPressed: () async {
+                                              await _changeReferralCodeForUser(u);
+                                              if (ctx.mounted) setDialogState(() {});
+                                            },
+                                            child: const Text('Edit Referral Code'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () async {
+                                              await _toggleCoAdmin(u);
+                                              if (ctx.mounted) setDialogState(() {});
+                                            },
+                                            child: Text(selectedTab == 1 ? 'Remove' : (isCoAdmin ? 'Remove' : 'Make Co-Admin')),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),
@@ -2788,13 +2810,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-  Future<void> _changeAdminReferralCode() async {
+  Future<void> _changeReferralCodeForUser(Map user) async {
     if (!isSuperAdmin) return;
-    final controller = TextEditingController(text: _referralCode);
+    final targetUid = (user['uid'] ?? widget.uid).toString();
+    final oldCode = (user['referralCode'] ?? (targetUid == widget.uid ? _referralCode : '')).toString();
+    final controller = TextEditingController(text: oldCode);
     final picked = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Admin Referral Code'),
+        title: Text('Referral Code • ${user['ign'] ?? user['email'] ?? 'Player'}'),
         content: TextField(controller: controller, textCapitalization: TextCapitalization.characters,
           inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]'))],
           maxLength: 12, decoration: const InputDecoration(labelText: 'Custom code', hintText: 'SKSAHID', helperText: '4–12 letters/numbers')),
@@ -2807,20 +2831,32 @@ class _HomeScreenState extends State<HomeScreen> {
     controller.dispose();
     if (picked == null) return;
     if (picked.length < 4 || picked.length > 12 || picked.contains(RegExp(r'[^A-Z0-9]'))) return _msg('Code 4 se 12 letters/numbers ka hona chahiye.');
-    final lookupUrl = Uri.parse(kDbUrl + '/referralLookup/' + picked + '.json?auth=' + widget.token);
-    final check = await http.get(lookupUrl);
+    final newUrl = Uri.parse(kDbUrl + '/referralLookup/' + picked + '.json?auth=' + widget.token);
+    final check = await http.get(newUrl);
     if (check.statusCode != 200) return _msg('Code check nahi ho paya. Firebase Rules check karein.');
     if (check.body != 'null') {
       final existing = jsonDecode(check.body);
-      if (existing is! Map || existing['uid']?.toString() != widget.uid) return _msg('Ye referral code pehle se kisi aur ka hai.');
+      if (existing is! Map || existing['uid']?.toString() != targetUid) return _msg('Ye referral code kisi aur player ka hai.');
     }
-    final save = await http.put(lookupUrl, body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
-    if (save.statusCode < 200 || save.statusCode >= 300) return _msg('Referral code save nahi hua. Firebase Rules check karein.');
-    final userUrl = Uri.parse(kDbUrl + '/users/' + widget.uid + '/referralCode.json?auth=' + widget.token);
-    final userSave = await http.put(userUrl, body: jsonEncode(picked));
-    if (userSave.statusCode < 200 || userSave.statusCode >= 300) return _msg('Code mapping ban gaya, profile update fail hua.');
-    if (mounted) setState(() => _referralCode = picked);
-    _msg('Admin referral code update ho gaya!');
+    final mapSave = await http.put(newUrl, body: jsonEncode({'uid': targetUid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
+    if (mapSave.statusCode < 200 || mapSave.statusCode >= 300) return _msg('Naya referral lookup save nahi hua.');
+    final profileUrl = Uri.parse(kDbUrl + '/users/' + targetUid + '/referralCode.json?auth=' + widget.token);
+    final profileSave = await http.put(profileUrl, body: jsonEncode(picked));
+    if (profileSave.statusCode < 200 || profileSave.statusCode >= 300) {
+      if (oldCode != picked) await http.delete(newUrl);
+      return _msg('Player profile update nahi hua. Purana code same rakha hai.');
+    }
+    if (oldCode.isNotEmpty && oldCode != picked) {
+      final oldUrl = Uri.parse(kDbUrl + '/referralLookup/' + oldCode + '.json?auth=' + widget.token);
+      final oldRes = await http.get(oldUrl);
+      if (oldRes.statusCode == 200 && oldRes.body != 'null') {
+        final oldData = jsonDecode(oldRes.body);
+        if (oldData is Map && oldData['uid']?.toString() == targetUid) await http.delete(oldUrl);
+      }
+    }
+    if (targetUid == widget.uid && mounted) setState(() => _referralCode = picked);
+    _msg('Referral code update ho gaya: $picked');
+    _sync();
   }
   Widget _referralCard() {
     final code = _referralCode.isEmpty ? widget.uid : _referralCode;
@@ -2834,7 +2870,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: SelectableText('Your Code: $code', style: const TextStyle(fontWeight: FontWeight.bold))),
-            if (isSuperAdmin) IconButton(tooltip: 'Edit admin referral code', onPressed: _changeAdminReferralCode, icon: const Icon(Icons.edit, color: Color(0xFFFF9800))),
+            if (isSuperAdmin) IconButton(tooltip: 'Edit admin referral code', onPressed: () => _changeReferralCodeForUser({'uid': widget.uid, 'email': widget.email, 'ign': _ign, 'referralCode': _referralCode}), icon: const Icon(Icons.edit, color: Color(0xFFFF9800))),
             IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
           ]),
           Row(children: [
@@ -2858,7 +2894,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 leading: Icon(success ? Icons.check_circle : Icons.hourglass_top, color: success ? const Color(0xFF00E676) : Colors.orange),
                 title: Text((entry['ign'] ?? 'Player').toString()),
                 subtitle: Text('$date • ${success ? 'Deposit approved' : 'Waiting for first ₹20+ approved deposit'}'),
-                trailing: Text(success ? '+₹${_num(entry['reward'])}' : 'PENDING', style: TextStyle(fontWeight: FontWeight.bold, color: success ? const Color(0xFF00E676) : Colors.orange, fontSize: 11)),
+                trailing: Text(success ? 'Completed' : 'Pending', style: TextStyle(fontWeight: FontWeight.bold, color: success ? const Color(0xFF00E676) : Colors.orange, fontSize: 11)),
               );
             }),
         ]),
