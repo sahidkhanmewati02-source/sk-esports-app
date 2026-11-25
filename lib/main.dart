@@ -481,6 +481,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _matchTicker;
   List _matches = [], _txns = [], _deps = [], _withs = [], _users = [], _chatMessages = [], _aboutLinks = [], _matchAccounts = [], _pendingRewardClaims = [];
   int? _scratchRewardPreview, _spinRewardPreview;
+  int _scratchGestureCount = 0;
+  double _spinRotation = 0;
   bool _scratchBusy = false, _spinBusy = false;
   String _rulesText = 'BGMI Level 30+ ID required.\nRoom ID & Password match se 15 minute pehle milega.\nChat mein abuse, spam aur personal details share na karein.\nEntry fee aur withdrawal ke liye sahi UTR/UPI details dein.';
   final _chatC = TextEditingController(), _aboutLinksC = TextEditingController(), _rulesC = TextEditingController();
@@ -2357,22 +2359,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   int _weightedScratchSpinCoins() {
-    const weighted = [5, 5, 5, 7, 7, 7, 8, 8, 8, 12];
+    const weighted = [5, 5, 5, 5, 5, 7, 7, 7, 8, 8, 8, 8, 8, 12];
     return weighted[math.Random.secure().nextInt(weighted.length)];
   }
 
   Future<void> _revealScratchCard() async {
-    if (_scratchBusy || _rewardAdBusy) return;
+    if (_scratchBusy || _rewardAdBusy || _scratchRewardPreview != null) return;
     final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
     if ((sameDay ? _num(_rewards['scratchCount']) : 0) >= 10) return _msg('Aaj ke 10 Scratch Cards complete ho gaye. Reset 5:00 AM IST par hoga.');
-    setState(() => _scratchRewardPreview = _weightedScratchSpinCoins());
+    setState(() { _scratchRewardPreview = _weightedScratchSpinCoins(); _scratchGestureCount = 0; });
   }
 
   Future<void> _revealSpin() async {
-    if (_spinBusy || _rewardAdBusy) return;
+    if (_spinBusy || _rewardAdBusy || _spinRewardPreview != null) return;
     final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
     if ((sameDay ? _num(_rewards['spinCount']) : 0) >= 10) return _msg('Aaj ke 10 Spins complete ho gaye. Reset 5:00 AM IST par hoga.');
-    setState(() => _spinRewardPreview = _weightedScratchSpinCoins());
+    final reward = _weightedScratchSpinCoins();
+    setState(() { _spinBusy = true; _spinRotation += (math.pi * 8) + math.Random().nextDouble() * math.pi * 2; });
+    await Future<void>.delayed(const Duration(milliseconds: 1800));
+    if (mounted) setState(() { _spinRewardPreview = reward; _spinBusy = false; });
   }
 
   Future<void> _claimScratchOrSpin(String kind) async {
@@ -2515,11 +2520,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _rewardsCard({VoidCallback? onChanged}) {
     final coins = _num(_rewards['coins']), bonus = _num(_rewards['bonusWallet']);
     final sameDay = _rewards['scratchSpinDayKey'] == _currentRewardDayKey();
-    final scratchCount = sameDay ? _num(_rewards['scratchCount']) : 0, spinCount = sameDay ? _num(_rewards['spinCount']) : 0;
+    final scratchCount = sameDay ? _num(_rewards['scratchCount']) : 0;
+    final spinCount = sameDay ? _num(_rewards['spinCount']) : 0;
     final pendingMap = _rewards['pendingClaims'] is Map ? Map<String, dynamic>.from(_rewards['pendingClaims']) : <String, dynamic>{};
     final myPending = pendingMap.values.where((v) => v is Map && v['status'] == 'PENDING').length;
-    final scratchBusy = _scratchBusy || _rewardAdBusy, spinBusy = _spinBusy || _rewardAdBusy;
-    const pendingMessage = 'Abhi Pending hai. Admin isko subah 6 se 7 baje, dopahar 12 se 2 baje, aur shaam 6 se 10 baje ke beech 100% approve kar dega aur ye Bonus Wallet mein add hoga.';
+    final scratchBusy = _scratchBusy || _rewardAdBusy;
+    final spinBusy = _spinBusy || _rewardAdBusy;
+    const pendingMessage = 'Ad complete hone ke baad claim Pending mein save hoga. Admin approval ke baad Bonus Wallet mein add hoga.';
     return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [const Expanded(child: Text('SCRATCH CARD & SPIN REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))), Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold))]),
       const SizedBox(height: 4),
@@ -2529,29 +2536,53 @@ class _HomeScreenState extends State<HomeScreen> {
       Card(color: const Color(0xFF202936), child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
         const Text('SCRATCH CARD', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
         Text('Daily: $scratchCount/10', style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 6),
-        Text(_scratchRewardPreview == null ? 'Tap to scratch and reveal coins' : 'You revealed $_scratchRewardPreview coins!', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: OutlinedButton(onPressed: scratchCount >= 10 || scratchBusy ? null : () async { await _revealScratchCard(); onChanged?.call(); }, child: const Text('Scratch Now'))),
-          const SizedBox(width: 8),
-          Expanded(child: ElevatedButton(onPressed: _scratchRewardPreview == null || scratchBusy ? null : () async { await _claimScratchOrSpin('scratch'); onChanged?.call(); }, child: Text(_scratchBusy ? 'Loading Ad...' : 'Claim'))),
-        ]),
+        GestureDetector(
+          onPanUpdate: (_) {
+            if (_scratchRewardPreview != null || scratchBusy || scratchCount >= 10) return;
+            _scratchGestureCount++;
+            if (_scratchGestureCount >= 8) _revealScratchCard();
+          },
+          onTap: () { if (_scratchRewardPreview == null) _msg('Card ko ungli se rub/scratch karein.'); },
+          child: Container(
+            height: 118, width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: const LinearGradient(colors: [Color(0xFFFFB300), Color(0xFFFF6F00), Color(0xFF8D3B00)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              border: Border.all(color: const Color(0xFFFFD54F), width: 2),
+              boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 4))],
+            ),
+            child: Center(child: _scratchRewardPreview == null
+              ? const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.touch_app, size: 32, color: Colors.white), SizedBox(height: 5), Text('RUB HERE TO SCRATCH', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.1)), Text('Scratch the card to reveal', style: TextStyle(color: Colors.white70, fontSize: 11))])
+              : Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.stars, color: Colors.white, size: 30), Text('$_scratchRewardPreview COINS', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 25)), const Text('Reward revealed!', style: TextStyle(color: Colors.white70))]),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton(onPressed: _scratchRewardPreview == null || scratchBusy ? null : () async { await _claimScratchOrSpin('scratch'); onChanged?.call(); }, child: Text(_scratchBusy ? 'Loading / Saving...' : 'CLAIM • WATCH AD')),
       ]))),
       Card(color: const Color(0xFF202936), child: Padding(padding: const EdgeInsets.all(10), child: Column(children: [
         const Text('SPIN WHEEL', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
         Text('Daily: $spinCount/10', style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 6),
-        Text(_spinRewardPreview == null ? 'Tap Spin and reveal coins' : 'You won $_spinRewardPreview coins!', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: OutlinedButton(onPressed: spinCount >= 10 || spinBusy ? null : () async { await _revealSpin(); onChanged?.call(); }, child: const Text('Spin Now'))),
-          const SizedBox(width: 8),
-          Expanded(child: ElevatedButton(onPressed: _spinRewardPreview == null || spinBusy ? null : () async { await _claimScratchOrSpin('spin'); onChanged?.call(); }, child: Text(_spinBusy ? 'Loading Ad...' : 'Claim'))),
-        ]),
+        SizedBox(height: 174, child: Stack(alignment: Alignment.topCenter, children: [
+          Padding(padding: const EdgeInsets.only(top: 10), child: TweenAnimationBuilder<double>(
+            key: ValueKey(_spinRotation),
+            tween: Tween<double>(begin: _spinRotation - (math.pi * 8), end: _spinRotation),
+            duration: const Duration(milliseconds: 1800),
+            curve: Curves.easeOutCubic,
+            builder: (_, angle, child) => Transform.rotate(angle: angle, child: child),
+            child: Container(width: 148, height: 148, decoration: BoxDecoration(shape: BoxShape.circle, gradient: const SweepGradient(colors: [Color(0xFFFF9800), Color(0xFF00C853), Color(0xFF2196F3), Color(0xFFE91E63), Color(0xFFFFEB3B), Color(0xFFFF9800)]), border: Border.all(color: Colors.white, width: 3)), child: const Center(child: CircleAvatar(radius: 27, backgroundColor: Color(0xFF161B22), child: Icon(Icons.casino, color: Color(0xFFFFB300), size: 32)))),
+          )),
+          const Icon(Icons.arrow_drop_down, size: 42, color: Colors.white),
+        ])),
+        Text(_spinRewardPreview == null ? (_spinBusy ? 'Spinning...' : 'Tap SPIN to start') : '$_spinRewardPreview COINS WON!', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        ElevatedButton(onPressed: spinCount >= 10 || spinBusy || _spinRewardPreview != null ? null : _revealSpin, child: Text(spinBusy ? 'SPINNING...' : 'SPIN NOW')),
+        ElevatedButton(onPressed: _spinRewardPreview == null || spinBusy || _rewardAdBusy ? null : () async { await _claimScratchOrSpin('spin'); onChanged?.call(); }, child: Text(_rewardAdBusy ? 'Loading Ad...' : 'CLAIM • WATCH AD')),
       ]))),
       const SizedBox(height: 8),
-      const Text(pendingMessage, style: TextStyle(fontSize: 11, color: Colors.amber)),
+      Text(pendingMessage, style: const TextStyle(fontSize: 11, color: Colors.amber)),
       const SizedBox(height: 8),
       ElevatedButton(onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)), child: const Text('Exchange Existing Coins', style: TextStyle(color: Colors.black))),
       if (coins < 100) const Text('Exchange ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
