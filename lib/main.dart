@@ -7,7 +7,6 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:unity_ads_plugin/unity_ads_plugin.dart';
 
 
 const String kApiKey = 'AIzaSyDdXPfU6_RkgFXyq58nUeEFIQI3JI_nVf0';
@@ -463,16 +462,12 @@ class _HomeScreenState extends State<HomeScreen> {
   bool get isAdmin => isSuperAdmin || _isCoAdmin;
   int _tab = 0, _wallet = 0;
   Map<String, dynamic> _rewards = {};
-  List _rewardHistory = [];
   int _referralCount = 0, _referralEarnings = 0;
   String _referralCode = '', _referredBy = '';
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
-  String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com', _rewardAdUrl = '';
+  String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
   String _promoImageUrl = '', _promoClickUrl = '';
   String _adsterraBannerCode = '';
-  String _unityGameId = '', _unityRewardedPlacementId = '';
-  bool _unityTestMode = true, _rewardAdBusy = false;
-  DateTime _rewardCooldownUntil = DateTime.fromMillisecondsSinceEpoch(0);
   bool _promoEnabled = false, _autoBannerAdEnabled = true;
   bool _loading = true;
   String _superAdminUid = '';
@@ -484,12 +479,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _upiC = TextEditingController(), _qrC = TextEditingController();
   final _joinAdUrlController = TextEditingController(text: 'https://example.com');
   final _roomAdUrlController = TextEditingController(text: 'https://example.com');
-  final _rewardAdUrlController = TextEditingController();
   final _promoImageUrlController = TextEditingController();
   final _promoClickUrlController = TextEditingController();
   final _adsterraBannerCodeController = TextEditingController();
-  final _unityGameIdController = TextEditingController();
-  final _unityPlacementIdController = TextEditingController();
 
   @override
   void initState() {
@@ -501,7 +493,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _matchTicker?.cancel();
-    _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _rewardAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose(); _adsterraBannerCodeController.dispose(); _unityGameIdController.dispose(); _unityPlacementIdController.dispose();
+    _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose(); _adsterraBannerCodeController.dispose();
     _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose();
     super.dispose();
   }
@@ -628,23 +620,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _qrUrl = c['qrUrl'] ?? '';
         _joinAdUrl = c['joinAdUrl'] ?? 'https://example.com';
         _roomAdUrl = c['roomAdUrl'] ?? 'https://example.com';
-        final configuredRewardUrl = (c['rewardAdUrl'] ?? '').toString().trim();
-        _rewardAdUrl = configuredRewardUrl.toLowerCase() == 'https://example.com' || configuredRewardUrl.toLowerCase() == 'http://example.com' ? '' : configuredRewardUrl;
         _promoImageUrl = c['promoImageUrl'] ?? '';
         _promoClickUrl = c['promoClickUrl'] ?? '';
         _promoEnabled = c['promoEnabled'] == true;
         _adsterraBannerCode = c['adsterraBannerCode']?.toString() ?? '';
         _autoBannerAdEnabled = c['autoBannerAdEnabled'] != false;
-        _unityGameId = (c['unityGameId'] ?? '').toString().trim();
-        _unityRewardedPlacementId = (c['unityRewardedPlacementId'] ?? '').toString().trim();
-        _unityTestMode = c['unityTestMode'] != false;
-        _unityGameIdController.text = _unityGameId;
-        _unityPlacementIdController.text = _unityRewardedPlacementId;
         _adsterraBannerCodeController.text = _adsterraBannerCode;
         _superAdminUid = '${c['superAdminUid'] ?? ''}';
         _joinAdUrlController.text = _joinAdUrl;
         _roomAdUrlController.text = _roomAdUrl;
-        _rewardAdUrlController.text = _rewardAdUrl;
         _promoImageUrlController.text = _promoImageUrl;
         _promoClickUrlController.text = _promoClickUrl;
       }
@@ -662,33 +646,24 @@ class _HomeScreenState extends State<HomeScreen> {
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
         _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
-        _rewardHistory = d['rewardHistory'] is Map
-            ? (d['rewardHistory'] as Map).entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'id': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()..sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)))
-            : <dynamic>[];
         _referralCode = (d['referralCode'] ?? widget.uid).toString();
         _referralCount = _num(d['referralCount']);
         _referralEarnings = _num(d['referralEarnings']);
         _referredBy = (d['referredBy'] ?? '').toString();
+        final rewardKeys = ['bonusWallet','discountMatchId','discountAmount','discountsUsed','updatedAt'];
         if (_rewards.isEmpty) {
           await _ensureRewards();
-        } else if (!_rewards.containsKey('discountsUsed') ||
-            !_rewards.containsKey('discountMatchId') ||
-            !_rewards.containsKey('discountAmount') ||
-            !_rewards.containsKey('rewardDayKey') ||
-            !_rewards.containsKey('rewardDayStart')) {
-          final migrated = Map<String, dynamic>.from(_rewards);
-          migrated['discountsUsed'] = migrated['discountsUsed'] is Map ? migrated['discountsUsed'] : <String, dynamic>{'_init': false};
-          migrated['discountMatchId'] = migrated['discountMatchId'] ?? '';
-          migrated['discountAmount'] = migrated['discountAmount'] ?? 0;
-          migrated['rewardDayKey'] = _currentRewardDayKey();
-          migrated['rewardDayStart'] = _currentRewardDayStart();
-          migrated['watchCount'] = 0;
-          migrated['streakClaimed'] = false;
-          migrated['dailyBonusClaimed'] = false;
-          migrated['updatedAt'] = {'.sv': 'timestamp'};
+        } else if (rewardKeys.any((key) => !_rewards.containsKey(key)) ||
+            _rewards.keys.any((key) => !rewardKeys.contains(key))) {
+          final migrated = <String, dynamic>{
+            'bonusWallet': _num(_rewards['bonusWallet']),
+            'discountMatchId': (_rewards['discountMatchId'] ?? '').toString(),
+            'discountAmount': _num(_rewards['discountAmount']),
+            'discountsUsed': _rewards['discountsUsed'] is Map ? _rewards['discountsUsed'] : <String, dynamic>{},
+            'updatedAt': {'.sv': 'timestamp'},
+          };
           await _putRewards(migrated);
         }
-        await _resetRewardsForNewIstDay();
         if (d['referralCode'] == null) {
           await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(widget.uid));
         }
@@ -1466,16 +1441,6 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         });
       }
-      if (u['rewardHistory'] is Map) {
-        (u['rewardHistory'] as Map).forEach((historyId, value) {
-          if (value is Map) list.add({
-            ...Map<String, dynamic>.from(value),
-            'id': historyId.toString(),
-            'ign': u['ign'] ?? 'Player',
-            '_historyKind': 'reward',
-          });
-        });
-      }
     }
     list.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
     showDialog(
@@ -1498,9 +1463,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         '${t['sub'] ?? ''} • ${t['status'] ?? ''}\n${_formatHistoryDateTime(t)}',
                         style: const TextStyle(fontSize: 11),
                       ),
-                      trailing: t['_historyKind'] == 'reward'
-                          ? Text('+ ${t['coins'] ?? 0} coins', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))
-                          : Text('₹${t['amt']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+                      trailing: Text('₹${t['amt']}', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
                     );
                   },
                 ),
@@ -1572,25 +1535,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void _saveAdAndPromoConfig() async {
     _joinAdUrl = _joinAdUrlController.text.trim();
     _roomAdUrl = _roomAdUrlController.text.trim();
-    _rewardAdUrl = _rewardAdUrlController.text.trim();
     _promoImageUrl = _promoImageUrlController.text.trim();
     _promoClickUrl = _promoClickUrlController.text.trim();
     final data = {
       'joinAdUrl': _joinAdUrl,
       'roomAdUrl': _roomAdUrl,
-      'rewardAdUrl': _rewardAdUrlController.text.trim(),
       'promoImageUrl': _promoImageUrl,
       'promoClickUrl': _promoClickUrl,
       'promoEnabled': _promoEnabled,
       'adsterraBannerCode': _adsterraBannerCodeController.text.trim(),
       'autoBannerAdEnabled': _autoBannerAdEnabled,
-      'unityGameId': _unityGameIdController.text.trim(),
-      'unityRewardedPlacementId': _unityPlacementIdController.text.trim(),
-      'unityTestMode': _unityTestMode,
     };
     _adsterraBannerCode = _adsterraBannerCodeController.text.trim();
-    _unityGameId = _unityGameIdController.text.trim();
-    _unityRewardedPlacementId = _unityPlacementIdController.text.trim();
     final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode(data));
     if (res.statusCode >= 200 && res.statusCode < 300) {
       _msg('Ad, Promo aur Unity Ads settings saved!');
@@ -1983,18 +1939,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _ensureRewards() async {
     final initial = <String, dynamic>{
-      'coins': 0,
       'bonusWallet': 0,
-      'windowStart': {'.sv': 'timestamp'},
-      'rewardDayKey': _currentRewardDayKey(),
-      'rewardDayStart': _currentRewardDayStart(),
-      'watchCount': 0,
-      'streakDay': 0,
-      'streakClaimed': false,
-      'dailyBonusClaimed': false,
       'discountMatchId': '',
       'discountAmount': 0,
-      'discountsUsed': <String, dynamic>{'_init': false},
+      'discountsUsed': <String, dynamic>{},
       'updatedAt': {'.sv': 'timestamp'},
     };
     final res = await http.put(
@@ -2024,199 +1972,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return true;
   }
 
-  String _currentRewardDayKey() {
-    // Rewards reset at 05:00 India Standard Time (UTC+05:30).
-    final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
-    final rewardDay = ist.hour < 5 ? ist.subtract(const Duration(days: 1)) : ist;
-    return '${rewardDay.year.toString().padLeft(4, '0')}-${rewardDay.month.toString().padLeft(2, '0')}-${rewardDay.day.toString().padLeft(2, '0')}';
-  }
-
-  int _currentRewardDayStart() {
-    // 05:00 IST equals 23:30 UTC on the previous calendar day.
-    final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
-    final rewardDay = ist.hour < 5 ? ist.subtract(const Duration(days: 1)) : ist;
-    return DateTime.utc(rewardDay.year, rewardDay.month, rewardDay.day).millisecondsSinceEpoch - const Duration(minutes: 30).inMilliseconds;
-  }
-
-  Future<bool> _resetRewardsForNewIstDay() async {
-    final today = _currentRewardDayKey();
-    if (_rewards['rewardDayKey'] == today && _num(_rewards['rewardDayStart']) == _currentRewardDayStart()) return true;
-    final next = Map<String, dynamic>.from(_rewards);
-    next['rewardDayKey'] = today;
-    next['rewardDayStart'] = _currentRewardDayStart();
-    next['watchCount'] = 0;
-    next['streakClaimed'] = false;
-    next['dailyBonusClaimed'] = false;
-    next['updatedAt'] = {'.sv': 'timestamp'};
-    return await _putRewards(next);
-  }
-
-  Future<void> _startRewardCooldown() async {
-    final now = DateTime.now();
-    _rewardCooldownUntil = now.add(const Duration(seconds: 5));
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('unity_reward_last_finished_at', now.millisecondsSinceEpoch);
-    } catch (_) {}
-    if (mounted) setState(() {});
-  }
-
-  Future<bool> _showUnityRewardedAd() async {
-    if (_rewardAdBusy) return false;
-    if (_unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty) {
-      _msg('Unity Ads Game ID aur Rewarded Placement ID Admin Settings mein set karein.');
-      return false;
-    }
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final lastFinished = prefs.getInt('unity_reward_last_finished_at') ?? 0;
-      if (lastFinished > 0) {
-        final allowedAt = DateTime.fromMillisecondsSinceEpoch(lastFinished).add(const Duration(seconds: 5));
-        if (DateTime.now().isBefore(allowedAt)) {
-          _rewardCooldownUntil = allowedAt;
-          if (mounted) setState(() {});
-          _msg('Agla rewarded ad 5 seconds baad available hoga.');
-          return false;
-        }
-      }
-    } catch (_) {}
-    setState(() => _rewardAdBusy = true);
-    var adStarted = false;
-    var cooldownMarked = false;
-    Future<void> markCooldownOnce() async {
-      if (!adStarted || cooldownMarked) return;
-      cooldownMarked = true;
-      await _startRewardCooldown();
-    }
-    try {
-      if (!await UnityAds.isInitialized()) {
-        final initialized = Completer<void>();
-        await UnityAds.init(
-          gameId: _unityGameId.trim(),
-          testMode: _unityTestMode,
-          onComplete: () { if (!initialized.isCompleted) initialized.complete(); },
-          onFailed: (error, message) { if (!initialized.isCompleted) initialized.completeError(Exception('Unity Ads init failed: $message')); },
-        );
-        await initialized.future.timeout(const Duration(seconds: 30));
-      }
-      final loaded = Completer<void>();
-      await UnityAds.load(
-        placementId: _unityRewardedPlacementId.trim(),
-        onComplete: (_) { if (!loaded.isCompleted) loaded.complete(); },
-        onFailed: (_, error, message) { if (!loaded.isCompleted) loaded.completeError(Exception('Unity rewarded ad load failed: $message')); },
-      );
-      await loaded.future.timeout(const Duration(seconds: 45));
-      final finished = Completer<bool>();
-      await UnityAds.showVideoAd(
-        placementId: _unityRewardedPlacementId.trim(),
-        onStart: (_) { adStarted = true; },
-        onSkipped: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(false); },
-        onComplete: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(true); },
-        onFailed: (_, error, message) {
-          markCooldownOnce();
-          if (!finished.isCompleted) finished.complete(false);
-          if (mounted) _msg('Unity Ads show failed: $message');
-        },
-      );
-      final completed = await finished.future.timeout(const Duration(minutes: 3), onTimeout: () => false);
-      if (completed) return true;
-      _msg('Ad complete nahi hua; reward coins add nahi hue.');
-      return false;
-    } catch (error) {
-      await markCooldownOnce();
-      _msg(error.toString().replaceFirst('Exception: ', ''));
-      return false;
-    } finally {
-      if (mounted) setState(() => _rewardAdBusy = false);
-    }
-  }
-
-  Future<void> _startUnityReward(String kind) async {
-    if (_rewardAdBusy) return;
-    final completed = await _showUnityRewardedAd();
-    if (completed && mounted) await _claimReward(kind);
-  }
-
-  Future<void> _claimReward(String kind) async {
-    if (_rewards.isEmpty) await _ensureRewards();
-    if (!await _resetRewardsForNewIstDay()) return _msg('Daily reset save nahi hua. Rewards Refresh karke dobara try karein.');
-    final current = Map<String, dynamic>.from(_rewards);
-    final next = Map<String, dynamic>.from(current);
-    var reward = 0;
-    String title;
-    if (kind == 'watch') {
-      if (_num(current['watchCount']) >= 20) return _msg('Aaj ke 20 Watch & Earn claims complete ho gaye. Reset 5:00 AM IST par hoga.');
-      next['watchCount'] = _num(current['watchCount']) + 1;
-      reward = 10;
-      title = 'Watch & Earn';
-    } else if (kind == 'streak') {
-      if (current['streakClaimed'] == true) return _msg('Daily Streak aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
-      final day = (_num(current['streakDay']) % 7) + 1;
-      const payouts = [10, 15, 20, 25, 30, 35, 40];
-      reward = payouts[day - 1];
-      next['streakDay'] = day;
-      next['streakClaimed'] = true;
-      title = 'Daily Streak • Day $day';
-    } else if (kind == 'daily') {
-      if (current['dailyBonusClaimed'] == true) return _msg('Daily Bonus aaj claim ho chuka hai. Reset 5:00 AM IST par hoga.');
-      reward = math.Random.secure().nextInt(20) + 1;
-      next['dailyBonusClaimed'] = true;
-      title = 'Daily Bonus';
-    } else {
-      return;
-    }
-    final dayKey = _currentRewardDayKey();
-    final dayStart = _currentRewardDayStart();
-    next['rewardDayKey'] = dayKey;
-    next['rewardDayStart'] = dayStart;
-    next['coins'] = _num(current['coins']) + reward;
-    next['updatedAt'] = {'.sv': 'timestamp'};
-    final historyId = DateTime.now().microsecondsSinceEpoch.toString();
-    final history = <String, dynamic>{
-      'type': kind,
-      'title': title,
-      'coins': reward,
-      'watchCount': _num(next['watchCount']),
-      'streakDay': _num(next['streakDay']),
-      'rewardDayKey': dayKey,
-      'createdAt': {'.sv': 'timestamp'},
-    };
-    final patch = <String, dynamic>{
-      'users/${widget.uid}/rewards': next,
-      'users/${widget.uid}/rewardHistory/$historyId': history,
-    };
-    final res = await http.patch(
-      Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
-      body: jsonEncode(patch),
-    );
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      return _msg('Reward save fail (${res.statusCode}): ${res.body}');
-    }
-    _rewards = next;
-    _rewardHistory.insert(0, {
-      'id': historyId,
-      ...history,
-      'createdAt': DateTime.now().millisecondsSinceEpoch,
-    });
-    _rewardHistory.sort((a, b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
-    if (mounted) setState(() {});
-    _msg('Mubarak! $reward coins Bonus Wallet rewards mein add hue.');
-  }
-
-  Future<void> _exchangeCoins() async {
-    final coins = _num(_rewards['coins']);
-    final rupees = coins ~/ 100;
-    if (rupees < 1) return _msg('Exchange ke liye kam se kam 100 coins chahiye.');
-    final next = Map<String, dynamic>.from(_rewards);
-    next['coins'] = coins - (rupees * 100);
-    next['bonusWallet'] = _num(_rewards['bonusWallet']) + rupees;
-    next['updatedAt'] = {'.sv': 'timestamp'};
-    if (!await _putRewards(next)) {
-      return _msg('Coin Exchange Rules ne reject kiya. Refresh karke try karein.');
-    }
-    _msg('$rupees rupees Bonus Wallet mein add hue. Main Wallet unchanged hai.');
-  }
-
   Widget _referralCard() {
     final code = _referralCode.isEmpty ? widget.uid : _referralCode;
     return Card(
@@ -2236,91 +1991,6 @@ class _HomeScreenState extends State<HomeScreen> {
             Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
           ]),
           if (_referredBy.isNotEmpty) const Text('Referral linked to your account.', style: TextStyle(fontSize: 10, color: Colors.grey)),
-        ]),
-      ),
-    );
-  }
-
-  Widget _rewardsCard({VoidCallback? onChanged}) {
-    final coins = _num(_rewards['coins']);
-    final bonus = _num(_rewards['bonusWallet']);
-    final watched = _num(_rewards['watchCount']);
-    final streak = _num(_rewards['streakDay']);
-    final unityConfigMissing = _unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty;
-    final rewardDayMatches = _rewards['rewardDayKey'] == _currentRewardDayKey();
-    final cooldown = _rewardCooldownUntil.difference(_clock);
-    final cooldownActive = cooldown.inSeconds > 0;
-    final streakDone = rewardDayMatches && _rewards['streakClaimed'] == true;
-    final dailyDone = rewardDayMatches && _rewards['dailyBonusClaimed'] == true;
-    final displayWatched = rewardDayMatches ? watched : 0;
-    final cooldownLabel = cooldownActive
-        ? '${cooldown.inHours.toString().padLeft(2, '0')}:${(cooldown.inMinutes % 60).toString().padLeft(2, '0')}:${(cooldown.inSeconds % 60).toString().padLeft(2, '0')}'
-        : '';
-    // 20 Watch + 1 Streak + 1 Daily Bonus; reset at 05:00 IST.
-    final watchBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || (rewardDayMatches && watched >= 20);
-    final streakBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || streakDone;
-    final dailyBlocked = unityConfigMissing || _rewardAdBusy || cooldownActive || dailyDone;
-    String rewardReason(String kind) {
-      if (unityConfigMissing) return 'Unity Ads Game ID / Rewarded Placement ID Admin Settings mein set karein.';
-      if (_rewardAdBusy) return 'Unity rewarded ad chal raha hai...';
-      if (cooldownActive) return 'Agla rewarded ad ${cooldown.inSeconds + 1} seconds baad available hoga.';
-      if (kind == 'watch' && rewardDayMatches && watched >= 20) return 'Aaj ke 20/20 claims complete. Reset 5:00 AM IST par hoga.';
-      if (kind == 'streak' && streakDone) return 'Daily Streak claimed. Reset 5:00 AM IST par hoga.';
-      if (kind == 'daily' && dailyDone) return 'Daily Bonus claimed. Reset 5:00 AM IST par hoga.';
-      return '';
-    }
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Expanded(child: Text('BONUS REWARDS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
-            Text('$coins Coins', style: const TextStyle(fontWeight: FontWeight.bold)),
-          ]),
-          const SizedBox(height: 4),
-          Text('Bonus Wallet: ₹$bonus  •  Non-withdrawable', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.w600)),
-          const Text('100 coins = ₹1 Bonus Wallet. Main Wallet alag aur protected hai.', style: TextStyle(fontSize: 11, color: Colors.grey)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            OutlinedButton(
-              onPressed: watchBlocked ? null : () async { await _startUnityReward('watch'); onChanged?.call(); },
-              child: Text('Watch & Earn ($displayWatched/20)'),
-            ),
-            OutlinedButton(
-              onPressed: streakBlocked ? null : () async { await _startUnityReward('streak'); onChanged?.call(); },
-              child: Text(streakDone ? 'Streak Claimed' : 'Daily Streak (Day ${streak % 7 + 1})'),
-            ),
-            OutlinedButton(
-              onPressed: dailyBlocked ? null : () async { await _startUnityReward('daily'); onChanged?.call(); },
-              child: Text(dailyDone ? 'Daily Bonus Claimed' : 'Daily Bonus'),
-            ),
-            ElevatedButton(
-              onPressed: coins >= 100 ? () async { await _exchangeCoins(); onChanged?.call(); } : null,
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
-              child: const Text('Exchange Coins', style: TextStyle(color: Colors.black)),
-            ),
-          ]),
-          if (unityConfigMissing || _rewardAdBusy || cooldownActive)
-            Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber))
-          else ...[
-            if (watchBlocked) Text(rewardReason('watch'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-            if (streakBlocked) Text(rewardReason('streak'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-            if (dailyBlocked) Text(rewardReason('daily'), style: const TextStyle(fontSize: 10, color: Colors.amber)),
-          ],
-          if (coins < 100) const Text('Exchange Coins ke liye kam se kam 100 coins chahiye.', style: TextStyle(fontSize: 10, color: Colors.grey)),
-          if (_rewardHistory.isNotEmpty) ...[
-            const Divider(height: 18),
-            const Text('REWARD CLAIM HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
-            ..._rewardHistory.take(10).map((entry) => ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.stars, color: Color(0xFFFF9800), size: 18),
-              title: Text('${entry['title'] ?? 'Reward'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              subtitle: Text(_formatHistoryDateTime(entry), style: const TextStyle(fontSize: 10, color: Colors.grey)),
-              trailing: Text('+ ${entry['coins'] ?? 0} coins', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
-            )),
-          ],
-          const Text('20 Watch & Earn + 1 Daily Streak + 1 Daily Bonus = max 22 rewarded ads/day. Reset daily 5:00 AM IST par hota hai. Unity Ads duration Unity decide karta hai; har ad ke baad 5-second cooldown hai. Firebase Spark client-only setup ad views/reward claims ko fully tamper-proof nahi bana sakta.', style: TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
       ),
     );
@@ -2764,37 +2434,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openRewardsPage() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => StatefulBuilder(
-      builder: (pageContext, setPageState) => Scaffold(
-        appBar: AppBar(
-          backgroundColor: const Color(0xFF161B22),
-          title: const Text('REWARDS & EARN', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
-          actions: [
-            IconButton(
-              tooltip: 'Refresh rewards and wallet data',
-              icon: const Icon(Icons.refresh, color: Color(0xFFFF9800)),
-              onPressed: () async {
-                await _sync();
-                if (!mounted) return;
-                setPageState(() {});
-                _msg('Rewards, coins, wallet aur referral data refresh ho gaya.');
-              },
-            ),
-          ],
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(14),
-          children: [
-            _rewardsCard(onChanged: () { if (pageContext.mounted) setPageState(() {}); }),
-            const SizedBox(height: 10),
-            _referralCard(),
-          ],
-        ),
-      ),
-    )));
-  }
-
   Widget build(BuildContext context) {
     final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
     final showAutoAd = _autoBannerAdEnabled && _adsterraBannerCode.trim().isNotEmpty;
@@ -3001,7 +2640,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ]),
       ),
       ListView(padding: const EdgeInsets.all(16), children: [
-        Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
+        Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),         _referralCard(),
+
         Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('RULES:\n$_rulesText'))),
         ..._aboutLinks.map((link) => Padding(padding: const EdgeInsets.only(bottom: 7), child: OutlinedButton.icon(onPressed: () async { final uri = Uri.tryParse(link['url'].toString()); if (uri != null && !await launchUrl(uri, mode: LaunchMode.externalApplication)) { await Clipboard.setData(ClipboardData(text: link['url'].toString())); _msg('Link copied!'); } }, icon: const Icon(Icons.open_in_new), label: Text(link['label'].toString())))),
                 OutlinedButton(
@@ -3030,16 +2670,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 8),
                 TextField(controller: _roomAdUrlController, decoration: const InputDecoration(labelText: 'Legacy Room Ad URL (unused)')),
                 const SizedBox(height: 8),
-                TextField(controller: _unityGameIdController, decoration: const InputDecoration(labelText: 'Unity Ads Game ID (Android)')),
-                const SizedBox(height: 8),
-                TextField(controller: _unityPlacementIdController, decoration: const InputDecoration(labelText: 'Unity Rewarded Placement ID')),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Unity Ads Test Mode'),
-                  subtitle: const Text('Testing ke dauran ON rakhein; live ads ke liye Unity Dashboard setup ke baad OFF karein.'),
-                  value: _unityTestMode,
-                  onChanged: (v) => setState(() => _unityTestMode = v),
-                ),
                 TextField(controller: _promoImageUrlController, decoration: const InputDecoration(labelText: 'Promo Image URL')),
                 const SizedBox(height: 8),
                 TextField(controller: _promoClickUrlController, decoration: const InputDecoration(labelText: 'Promo Click URL')),
@@ -3073,7 +2703,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: _saveAdAndPromoConfig,
                   child: const Text('Save Ad & Promo Settings'),
                 ),
-                const Text('Unity rewarded ads Game ID + Rewarded Placement ID se chalte hain. Join ad 10 seconds rahega; Room ID / Pass par ad nahi hai. Custom promo top par, normal network banner bottom par dikhega.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                const Text('Join button ad link yahin se control hota hai. Custom promo top par aur Adsterra banner bottom par dikhega.', style: TextStyle(fontSize: 11, color: Colors.grey)),
               ]),
             ),
           ),
@@ -3101,14 +2731,6 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('SK ESPORTS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _sync),
-          Padding(
-            padding: const EdgeInsets.only(right: 2),
-            child: TextButton.icon(
-              onPressed: _openRewardsPage,
-              icon: const Icon(Icons.card_giftcard, color: Color(0xFFFF9800), size: 18),
-              label: const Text('Earn', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
-            ),
-          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
