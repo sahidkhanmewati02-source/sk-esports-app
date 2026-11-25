@@ -2426,33 +2426,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _approvePendingReward(Map claim) async {
     if (!isAdmin) return;
-    final uid = (claim['uid'] ?? '').toString(), claimId = (claim['claimId'] ?? '').toString();
+    final uid = (claim['uid'] ?? '').toString();
+    final claimId = (claim['claimId'] ?? '').toString();
     if (uid.isEmpty || claimId.isEmpty) return _msg('Pending claim details missing.');
     try {
       final idToken = await _freshRewardsIdToken();
       final uri = Uri.parse('$kDbUrl/users/$uid/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}');
-      final getRes = await http.get(uri).timeout(const Duration(seconds: 12));
-      if (getRes.statusCode != 200 || getRes.body == 'null') throw Exception('Player rewards data read nahi hua.');
-      final data = Map<String, dynamic>.from(jsonDecode(getRes.body) as Map);
-      final pending = data['pendingClaims'] is Map ? Map<String, dynamic>.from(data['pendingClaims']) : <String, dynamic>{};
-      final item = pending[claimId];
-      if (item is! Map || item['status'] != 'PENDING') throw Exception('Ye claim already process ho chuka hai.');
-      final amount = _num(item['amount']);
-      if (amount < 1 || amount > 12) throw Exception('Invalid pending reward amount.');
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final patch = <String, dynamic>{
-        'bonusWallet': _num(data['bonusWallet']) + amount,
-        'pendingClaims/$claimId/status': 'APPROVED',
-        'pendingClaims/$claimId/approvedAt': now,
-        'pendingClaims/$claimId/approvedBy': widget.uid,
-        'updatedAt': now,
-      };
-      final saveRes = await http.patch(uri, headers: const {'Content-Type': 'application/json'}, body: jsonEncode(patch)).timeout(const Duration(seconds: 12));
-      if (saveRes.statusCode < 200 || saveRes.statusCode >= 300) throw Exception('Approve save nahi hua (HTTP ${saveRes.statusCode}). Rules update required ho sakte hain.');
-      if (mounted) setState(() => _pendingRewardClaims.removeWhere((x) => x['uid'].toString() == uid && x['claimId'].toString() == claimId));
-      _msg('$amount coins ka reward approve ho gaya aur Bonus Wallet mein add ho gaya.');
+      var approved = false;
+      for (var attempt = 0; attempt < 3 && !approved; attempt++) {
+        // Firebase ETag + If-Match prevents duplicate approvals.
+        final getRes = await http.get(uri, headers: const {'X-Firebase-ETag': 'true'}).timeout(const Duration(seconds: 12));
+        if (getRes.statusCode != 200 || getRes.body == 'null') throw Exception('Player rewards data read nahi hua.');
+        final etag = getRes.headers['etag'];
+        if (etag == null || etag.isEmpty) throw Exception('Firebase approval ETag nahi mila.');
+        final data = Map<String, dynamic>.from(jsonDecode(getRes.body) as Map);
+        final pending = data['pendingClaims'] is Map
+            ? Map<String, dynamic>.from(data['pendingClaims'])
+            : <String, dynamic>{};
+        final item = pending[claimId];
+        if (item is! Map || item['status'] != 'PENDING') throw Exception('Ye claim already process ho chuka hai.');
+        final amount = _num(item['amount']);
+        if (amount < 1 || amount > 12) throw Exception('Invalid pending reward amount.');
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final updatedItem = Map<String, dynamic>.from(item);
+        updatedItem['status'] = 'APPROVED';
+        updatedItem['approvedAt'] = now;
+        updatedItem['approvedBy'] = widget.uid;
+        pending[claimId] = updatedItem;
+        data['pendingClaims'] = pending;
+        data['bonusWallet'] = _num(data['bonusWallet']) + amount;
+        data['updatedAt'] = now;
+        final putRes = await http.put(uri,
+          headers: {'Content-Type': 'application/json', 'if-match': etag},
+          body: jsonEncode(data)).timeout(const Duration(seconds: 12));
+        if (putRes.statusCode == 412) continue;
+        if (putRes.statusCode < 200 || putRes.statusCode >= 300) {
+          throw Exception('Approve save nahi hua (HTTP ${putRes.statusCode}). Rules update required ho sakte hain.');
+        }
+        approved = true;
+        if (mounted) setState(() => _pendingRewardClaims.removeWhere(
+          (x) => x['uid'].toString() == uid && x['claimId'].toString() == claimId,
+        ));
+        _msg('$amount coins ka reward approve ho gaya aur Bonus Wallet mein add ho gaya.');
+      }
+      if (!approved) throw Exception('Reward kisi aur admin ne update kiya. Pending list refresh karein.');
       await _sync();
-    } catch (error) { _msg(error.toString().replaceFirst('Exception: ', '')); }
+    } catch (error) {
+      _msg(error.toString().replaceFirst('Exception: ', ''));
+    }
   }
 
   Future<void> _exchangeCoins() async {
