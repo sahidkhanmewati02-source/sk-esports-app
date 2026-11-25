@@ -2834,6 +2834,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: SelectableText('Your Code: $code', style: const TextStyle(fontWeight: FontWeight.bold))),
+            if (isSuperAdmin) IconButton(tooltip: 'Edit admin referral code', onPressed: _changeAdminReferralCode, icon: const Icon(Icons.edit, color: Color(0xFFFF9800))),
             IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
           ]),
           Row(children: [
