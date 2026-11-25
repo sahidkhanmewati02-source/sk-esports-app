@@ -709,9 +709,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_rewards.isEmpty) {
           await _ensureRewards();
         }
-        // One canonical migration/reset path; failures are logged but do not break
-        // the rest of the user's app refresh.
-        await _resetRewardsForNewIstDay();
+        // Scratch/Spin counters reset from their own IST day key; do not run the legacy Watch & Earn reset.
         if (d['referralCode'] == null) {
           await http.put(Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'), body: jsonEncode(widget.uid));
         }
