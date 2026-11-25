@@ -2380,7 +2380,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final reward = sectorRewards[sector];
     final step = (2 * math.pi) / 12;
     final centerAngle = -math.pi / 2 + (sector + 0.5) * step;
-    final alignToPointer = (2 * math.pi - centerAngle) % (2 * math.pi);
+    final alignToPointer = (-math.pi / 2 - centerAngle) % (2 * math.pi);
     setState(() {
       _spinBusy = true;
       _spinLandingNumber = sector + 1;
