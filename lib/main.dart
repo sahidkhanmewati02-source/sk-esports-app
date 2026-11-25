@@ -2038,37 +2038,54 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<bool> _resetRewardsForNewIstDay() async {
-    final today = _currentRewardDayKey();
-    final dayStart = _currentRewardDayStart();
-    if (_rewards['rewardDayKey'] == today &&
-        _num(_rewards['rewardDayStart']) == dayStart) return true;
-
-    // PATCH only reset fields. Never PUT a stale full rewards snapshot:
-    // this keeps concurrent coins/bonusWallet changes safe on the server.
-    final patch = <String, dynamic>{
-      'rewardDayKey': today,
-      'rewardDayStart': dayStart,
-      'watchCount': 0,
-      'streakDay': _num(_rewards['streakDay']).clamp(0, 7),
-      'streakClaimed': false,
-      'dailyBonusClaimed': false,
-      'updatedAt': DateTime.now().millisecondsSinceEpoch,
-    };
-
-    // Complete legacy records only where required by the rewards validator.
-    // Existing balances and existing settings are deliberately never rewritten.
-    if (!_rewards.containsKey('coins')) patch['coins'] = 0;
-    if (!_rewards.containsKey('bonusWallet')) patch['bonusWallet'] = 0;
-    if (!_rewards.containsKey('windowStart')) {
-      patch['windowStart'] = DateTime.now().millisecondsSinceEpoch;
-    }
-    if (!_rewards.containsKey('discountMatchId')) patch['discountMatchId'] = '';
-    if (!_rewards.containsKey('discountAmount')) patch['discountAmount'] = 0;
-    if (_rewards['discountsUsed'] is! Map) {
-      patch['discountsUsed'] = <String, dynamic>{'_init': false};
-    }
-
     try {
+      // Use Firebase server offset, not the phone clock. RTDB rules evaluate
+      // "now" on Firebase servers, so both sides calculate the same 05:00 IST boundary.
+      final offsetRes = await http.get(Uri.parse('$kDbUrl/.info/serverTimeOffset.json'));
+      if (offsetRes.statusCode != 200) {
+        _lastRewardsWriteError = 'Server time unavailable (HTTP ${offsetRes.statusCode})';
+        debugPrint('[SK ESPORTS] $_lastRewardsWriteError: ${offsetRes.body}');
+        return false;
+      }
+      final offsetValue = jsonDecode(offsetRes.body);
+      final serverOffset = offsetValue is num ? offsetValue.toInt() : 0;
+      final serverNow = DateTime.fromMillisecondsSinceEpoch(
+        DateTime.now().millisecondsSinceEpoch + serverOffset,
+        isUtc: true,
+      );
+      final ist = serverNow.add(const Duration(hours: 5, minutes: 30));
+      final rewardDay = ist.hour < 5 ? ist.subtract(const Duration(days: 1)) : ist;
+      final today = '${rewardDay.year.toString().padLeft(4, '0')}-${rewardDay.month.toString().padLeft(2, '0')}-${rewardDay.day.toString().padLeft(2, '0')}';
+      final dayStart = DateTime.utc(rewardDay.year, rewardDay.month, rewardDay.day)
+          .millisecondsSinceEpoch - const Duration(minutes: 30).inMilliseconds;
+
+      if (_rewards['rewardDayKey'] == today &&
+          _num(_rewards['rewardDayStart']) == dayStart) return true;
+
+      // PATCH only reset fields. Never PUT a stale full rewards snapshot:
+      // this keeps current coins/bonusWallet safe during concurrent changes.
+      final patch = <String, dynamic>{
+        'rewardDayKey': today,
+        'rewardDayStart': dayStart,
+        'watchCount': 0,
+        'streakDay': _num(_rewards['streakDay']).clamp(0, 7),
+        'streakClaimed': false,
+        'dailyBonusClaimed': false,
+        'updatedAt': serverNow.millisecondsSinceEpoch,
+      };
+
+      // Fill only missing legacy fields; never overwrite existing balances.
+      if (!_rewards.containsKey('coins')) patch['coins'] = 0;
+      if (!_rewards.containsKey('bonusWallet')) patch['bonusWallet'] = 0;
+      if (!_rewards.containsKey('windowStart')) {
+        patch['windowStart'] = serverNow.millisecondsSinceEpoch;
+      }
+      if (!_rewards.containsKey('discountMatchId')) patch['discountMatchId'] = '';
+      if (!_rewards.containsKey('discountAmount')) patch['discountAmount'] = 0;
+      if (_rewards['discountsUsed'] is! Map) {
+        patch['discountsUsed'] = <String, dynamic>{'_init': false};
+      }
+
       final res = await http.patch(
         Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}'),
         headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
@@ -2080,26 +2097,27 @@ class _HomeScreenState extends State<HomeScreen> {
         return false;
       }
 
-      // PATCH response can be partial; fetch the complete canonical node.
       final verify = await http.get(Uri.parse(
         '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}',
       ));
-      if (verify.statusCode == 200 && verify.body != 'null') {
-        final value = jsonDecode(verify.body);
-        if (value is Map) _rewards = Map<String, dynamic>.from(value);
+      if (verify.statusCode != 200 || verify.body == 'null') {
+        _lastRewardsWriteError = 'Reset saved but verification read failed (HTTP ${verify.statusCode})';
+        return false;
       }
+      final value = jsonDecode(verify.body);
+      if (value is Map) _rewards = Map<String, dynamic>.from(value);
       if (_rewards['rewardDayKey'] == today &&
           _num(_rewards['rewardDayStart']) == dayStart) {
         _lastRewardsWriteError = '';
         if (mounted) setState(() {});
         return true;
       }
-      _lastRewardsWriteError = 'Reset verification failed: latest rewards day did not match';
+      _lastRewardsWriteError = 'Reset verification failed: server reward day did not match';
       debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
       return false;
     } catch (error, stackTrace) {
       _lastRewardsWriteError = 'Network/client exception: $error';
-      debugPrint('[SK ESPORTS] Daily reset PATCH exception: $_lastRewardsWriteError\\n$stackTrace');
+      debugPrint('[SK ESPORTS] Daily reset exception: $_lastRewardsWriteError\\n$stackTrace');
       return false;
     }
   }
@@ -2236,8 +2254,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       return;
     }
-    final dayKey = _currentRewardDayKey();
-    final dayStart = _currentRewardDayStart();
+    // Reuse the day computed from Firebase server time by the reset step.
+    final dayKey = (current['rewardDayKey'] ?? '').toString();
+    final dayStart = _num(current['rewardDayStart']);
     next['rewardDayKey'] = dayKey;
     next['rewardDayStart'] = dayStart;
     next['coins'] = _num(current['coins']) + reward;
