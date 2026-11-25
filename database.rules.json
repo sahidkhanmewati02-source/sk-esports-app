@@ -49,8 +49,8 @@
           }
         },
         "referralCode": {
-          ".write": "auth != null && auth.uid === $uid && newData.val() === auth.uid",
-          ".validate": "newData.isString() && newData.val() === $uid"
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === $uid)",
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{4,12}$/)"
         }
       }
     },
@@ -129,6 +129,13 @@
             ".validate": "newData.hasChildren(['uid','ign','status','createdAt','reward']) && newData.child('status').val() === 'PENDING' && newData.child('reward').val() === 5 && newData.child('createdAt').isNumber()"
           }
         }
+      }
+    },
+    "referralLookup": {
+      ".read": "auth != null",
+      "$code": {
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === newData.child('uid').val() && !data.exists()))",
+        ".validate": "newData.hasChildren(['uid','createdAt']) && newData.child('uid').isString() && newData.child('createdAt').isNumber()"
       }
     }
   }
