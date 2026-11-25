@@ -122,7 +122,13 @@
       ".read": "auth != null",
       "$code": {
         ".write": "auth != null && auth.uid === $code && !data.exists() && newData.child('uid').val() === auth.uid",
-        ".validate": "newData.hasChildren(['uid','createdAt'])"
+        ".validate": "newData.hasChildren(['uid','createdAt'])",
+        "referrals": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && !data.exists() && newData.child('uid').val() === auth.uid && root.child('users').child(auth.uid).child('referredBy').val() === $code",
+            ".validate": "newData.hasChildren(['uid','ign','status','createdAt','reward']) && newData.child('status').val() === 'PENDING' && newData.child('reward').val() === 5 && newData.child('createdAt').isNumber()"
+          }
+        }
       }
     }
   }
