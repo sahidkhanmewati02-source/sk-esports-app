@@ -2013,7 +2013,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<bool> _putRewards(Map<String, dynamic> value) async {
     try {
       final res = await http.put(
-        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
+        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}'),
+        headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: jsonEncode(value),
       );
       if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -2054,11 +2055,21 @@ class _HomeScreenState extends State<HomeScreen> {
     final today = _currentRewardDayKey();
     if (_rewards['rewardDayKey'] == today && _num(_rewards['rewardDayStart']) == _currentRewardDayStart()) return true;
     final next = Map<String, dynamic>.from(_rewards);
+    // Normalize legacy reward records before the daily reset PUT.
+    next['coins'] = _num(next['coins']);
+    next['bonusWallet'] = _num(next['bonusWallet']);
+    next['windowStart'] = next['windowStart'] ?? {'.sv': 'timestamp'};
     next['rewardDayKey'] = today;
     next['rewardDayStart'] = _currentRewardDayStart();
     next['watchCount'] = 0;
+    next['streakDay'] = _num(next['streakDay']);
     next['streakClaimed'] = false;
     next['dailyBonusClaimed'] = false;
+    next['discountMatchId'] = next['discountMatchId']?.toString() ?? '';
+    next['discountAmount'] = _num(next['discountAmount']);
+    next['discountsUsed'] = next['discountsUsed'] is Map
+        ? Map<String, dynamic>.from(next['discountsUsed'] as Map)
+        : <String, dynamic>{'_init': false};
     next['updatedAt'] = {'.sv': 'timestamp'};
     final saved = await _putRewards(next);
     if (!saved) {
@@ -2079,9 +2090,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<bool> _showUnityRewardedAd() async {
     if (_rewardAdBusy) return false;
-    if (_unityGameId.trim().isEmpty || _unityRewardedPlacementId.trim().isEmpty) {
-      _msg('Unity Ads Game ID aur Rewarded Placement ID Admin Settings mein set karein.');
-      return false;
+    // Use the requested Unity test configuration when remote settings are blank.
+    final gameId = _unityGameId.trim().isEmpty ? '800451347' : _unityGameId.trim();
+    final placementId = _unityRewardedPlacementId.trim().isEmpty
+        ? 'BP_Rewarded_Android'
+        : _unityRewardedPlacementId.trim();
+    if (_unityTestMode) {
+      debugPrint('[SK ESPORTS] Unity test mode ON; gameId=$gameId placementId=$placementId');
     }
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2108,7 +2123,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!await UnityAds.isInitialized()) {
         final initialized = Completer<void>();
         await UnityAds.init(
-          gameId: _unityGameId.trim(),
+          gameId: gameId,
           testMode: _unityTestMode,
           onComplete: () { if (!initialized.isCompleted) initialized.complete(); },
           onFailed: (error, message) { if (!initialized.isCompleted) initialized.completeError(Exception('Unity Ads init failed: $message')); },
@@ -2117,7 +2132,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       final loaded = Completer<void>();
       await UnityAds.load(
-        placementId: _unityRewardedPlacementId.trim(),
+        placementId: placementId,
         onComplete: (_) { if (!loaded.isCompleted) loaded.complete(); },
         onFailed: (_, error, message) { if (!loaded.isCompleted) loaded.completeError(Exception('Unity rewarded ad load failed: $message')); },
       );
@@ -2125,16 +2140,23 @@ class _HomeScreenState extends State<HomeScreen> {
       final finished = Completer<bool>();
       await UnityAds.showVideoAd(
         placementId: _unityRewardedPlacementId.trim(),
-        onStart: (_) { adStarted = true; },
-        onSkipped: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(false); },
-        onComplete: (_) { markCooldownOnce(); if (!finished.isCompleted) finished.complete(true); },
-        onFailed: (_, error, message) {
+        onStart: (id) { adStarted = true; debugPrint('[SK ESPORTS] Unity ad started: $id'); },
+        onSkipped: (id) { debugPrint('[SK ESPORTS] Unity ad skipped: $id'); markCooldownOnce(); if (!finished.isCompleted) finished.complete(false); },
+        onComplete: (id) { debugPrint('[SK ESPORTS] Unity rewarded ad completed: $id'); markCooldownOnce(); if (!finished.isCompleted) finished.complete(true); },
+        onFailed: (id, error, message) {
+          debugPrint('[SK ESPORTS] Unity ad failed: $id $error $message');
           markCooldownOnce();
           if (!finished.isCompleted) finished.complete(false);
           if (mounted) _msg('Unity Ads show failed: $message');
         },
       );
-      final completed = await finished.future.timeout(const Duration(minutes: 3), onTimeout: () => false);
+      final completed = await finished.future.timeout(
+        const Duration(minutes: 3),
+        onTimeout: () {
+          debugPrint('[SK ESPORTS] Unity rewarded callback timeout for $placementId');
+          return false;
+        },
+      );
       if (completed) return true;
       _msg('Ad complete nahi hua; reward coins add nahi hue.');
       return false;
