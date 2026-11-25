@@ -511,6 +511,40 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
   int _num(dynamic v) => int.tryParse('$v') ?? 0;
 
+  // Refresh the Firebase ID token before rewards REST calls. The app uses
+  // Firebase Identity Toolkit REST auth, so the refresh token is stored in
+  // SharedPreferences rather than FirebaseAuth.currentUser.
+  Future<String> _freshRewardsIdToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final refreshToken = prefs.getString('rt');
+    if (refreshToken == null || refreshToken.isEmpty) {
+      throw Exception('Session expired. Please log in again.');
+    }
+    final response = await http.post(
+      Uri.parse('https://securetoken.googleapis.com/v1/token?key=$kApiKey'),
+      headers: const {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: {
+        'grant_type': 'refresh_token',
+        'refresh_token': refreshToken,
+      },
+    ).timeout(const Duration(seconds: 12));
+    if (response.statusCode != 200) {
+      debugPrint('[SK ESPORTS] Firebase token refresh failed: HTTP ${response.statusCode}');
+      throw Exception('Session refresh failed. Please log in again.');
+    }
+    final data = jsonDecode(response.body);
+    final token = (data['id_token'] ?? '').toString();
+    final returnedUid = (data['user_id'] ?? '').toString();
+    final rotatedRefreshToken = (data['refresh_token'] ?? '').toString();
+    if (token.isEmpty || returnedUid != widget.uid) {
+      throw Exception('Session validation failed. Please log in again.');
+    }
+    if (rotatedRefreshToken.isNotEmpty) {
+      await prefs.setString('rt', rotatedRefreshToken);
+    }
+    return token;
+  }
+
   int _matchStartTimestamp(Map m) {
     final direct = _num(m['startAt'] ?? m['startTime'] ?? m['scheduledAt']);
     if (direct > 0) return direct < 100000000000 ? direct * 1000 : direct;
@@ -1984,8 +2018,10 @@ class _HomeScreenState extends State<HomeScreen> {
       'discountsUsed': <String, dynamic>{'_init': false},
       'updatedAt': {'.sv': 'timestamp'},
     };
+    final idToken = await _freshRewardsIdToken();
     final res = await http.put(
-      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}'),
+      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
+      headers: const {'Content-Type': 'application/json'},
       body: jsonEncode(initial),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -1998,8 +2034,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<bool> _putRewards(Map<String, dynamic> value) async {
     try {
+      final idToken = await _freshRewardsIdToken();
       final res = await http.put(
-        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}'),
+        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
         headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: jsonEncode(value),
       );
@@ -2039,6 +2076,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<bool> _resetRewardsForNewIstDay() async {
     try {
+      final idToken = await _freshRewardsIdToken();
       // RTDB's /.info/serverTimeOffset is an SDK-only path and may return
       // HTTP 400 through the REST API. Retry briefly, then safely fall back
       // to the device's UTC clock instead of blocking Rewards & Earn.
@@ -2112,7 +2150,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final res = await http.patch(
-        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}'),
+        Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}'),
         headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: jsonEncode(patch),
       );
@@ -2123,7 +2161,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final verify = await http.get(Uri.parse(
-        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(widget.token)}',
+        '$kDbUrl/users/${widget.uid}/rewards.json?auth=${Uri.encodeQueryComponent(idToken)}',
       ));
       if (verify.statusCode != 200 || verify.body == 'null') {
         _lastRewardsWriteError = 'Reset saved but verification read failed (HTTP ${verify.statusCode})';
@@ -2252,7 +2290,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!await _resetRewardsForNewIstDay()) {
       final detail = _lastRewardsWriteError.isEmpty ? 'Firebase ne write reject kiya, lekin response body empty thi.' : _lastRewardsWriteError;
       debugPrint('[SK ESPORTS] Daily reset snackbar detail: $detail');
-      return _msg('Daily reset failed: $detail');
+      if (detail.contains('HTTP 401') || detail.contains('HTTP 403')) {
+        return _msg('Session verify nahi hua. Please logout karke dobara login karein.');
+      }
+      return _msg('Daily rewards reset nahi ho paya. Refresh karke dobara try karein.');
     }
     final current = Map<String, dynamic>.from(_rewards);
     final next = Map<String, dynamic>.from(current);
@@ -2300,12 +2341,22 @@ class _HomeScreenState extends State<HomeScreen> {
       'users/${widget.uid}/rewards': next,
       'users/${widget.uid}/rewardHistory/$historyId': history,
     };
+    String idToken;
+    try {
+      idToken = await _freshRewardsIdToken();
+    } catch (_) {
+      return _msg('Session refresh nahi hua. Please dobara login karein.');
+    }
     final res = await http.patch(
-      Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
+      Uri.parse('$kDbUrl/.json?auth=${Uri.encodeQueryComponent(idToken)}'),
+      headers: const {'Content-Type': 'application/json'},
       body: jsonEncode(patch),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      return _msg('Reward save fail (${res.statusCode}): ${res.body}');
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        return _msg('Session verify nahi hua. Please dobara login karein.');
+      }
+      return _msg('Reward save nahi hua. Refresh karke dobara try karein.');
     }
     _rewards = next;
     _rewardHistory.insert(0, {
