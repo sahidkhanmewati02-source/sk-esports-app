@@ -1946,7 +1946,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       nextRewards['discountMatchId'] = matchId;
                       nextRewards['discountAmount'] = discount;
                       nextRewards['bonusWallet'] = oldBonus - discount;
-                      nextRewards['updatedAt'] = {'.sv': 'timestamp'};
+                      nextRewards['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
                       if (!await _putRewards(nextRewards)) {
                         return _msg('Bonus discount reserve nahi hua. Main Wallet se payment nahi li gayi.');
                       }
@@ -2058,7 +2058,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Normalize legacy reward records before the daily reset PUT.
     next['coins'] = _num(next['coins']);
     next['bonusWallet'] = _num(next['bonusWallet']);
-    next['windowStart'] = _num(next['windowStart']) > 0 ? _num(next['windowStart']) : {'.sv': 'timestamp'};
+    next['windowStart'] = _num(next['windowStart']) > 0 ? _num(next['windowStart']) : DateTime.now().millisecondsSinceEpoch;
     next['rewardDayKey'] = today;
     next['rewardDayStart'] = _currentRewardDayStart();
     next['watchCount'] = 0;
@@ -2215,7 +2215,7 @@ class _HomeScreenState extends State<HomeScreen> {
     next['rewardDayKey'] = dayKey;
     next['rewardDayStart'] = dayStart;
     next['coins'] = _num(current['coins']) + reward;
-    next['updatedAt'] = {'.sv': 'timestamp'};
+    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
     final historyId = DateTime.now().microsecondsSinceEpoch.toString();
     final history = <String, dynamic>{
       'type': kind,
@@ -2224,7 +2224,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'watchCount': _num(next['watchCount']),
       'streakDay': _num(next['streakDay']),
       'rewardDayKey': dayKey,
-      'createdAt': {'.sv': 'timestamp'},
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
     };
     final patch = <String, dynamic>{
       'users/${widget.uid}/rewards': next,
@@ -2255,7 +2255,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final next = Map<String, dynamic>.from(_rewards);
     next['coins'] = coins - (rupees * 100);
     next['bonusWallet'] = _num(_rewards['bonusWallet']) + rupees;
-    next['updatedAt'] = {'.sv': 'timestamp'};
+    next['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
     if (!await _putRewards(next)) {
       return _msg('Coin Exchange Rules ne reject kiya. Refresh karke try karein.');
     }
