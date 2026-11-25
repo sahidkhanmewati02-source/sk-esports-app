@@ -2039,20 +2039,45 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<bool> _resetRewardsForNewIstDay() async {
     try {
-      // Use Firebase server offset, not the phone clock. RTDB rules evaluate
-      // "now" on Firebase servers, so both sides calculate the same 05:00 IST boundary.
-      final offsetRes = await http.get(Uri.parse('$kDbUrl/.info/serverTimeOffset.json'));
-      if (offsetRes.statusCode != 200) {
-        _lastRewardsWriteError = 'Server time unavailable (HTTP ${offsetRes.statusCode})';
-        debugPrint('[SK ESPORTS] $_lastRewardsWriteError: ${offsetRes.body}');
-        return false;
+      // RTDB's /.info/serverTimeOffset is an SDK-only path and may return
+      // HTTP 400 through the REST API. Retry briefly, then safely fall back
+      // to the device's UTC clock instead of blocking Rewards & Earn.
+      DateTime serverNow = DateTime.now().toUtc();
+      var gotServerOffset = false;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          final offsetRes = await http
+              .get(Uri.parse('$kDbUrl/.info/serverTimeOffset.json'))
+              .timeout(const Duration(seconds: 3));
+          if (offsetRes.statusCode == 200) {
+            final offsetValue = jsonDecode(offsetRes.body);
+            if (offsetValue is num) {
+              serverNow = DateTime.fromMillisecondsSinceEpoch(
+                DateTime.now().millisecondsSinceEpoch + offsetValue.toInt(),
+                isUtc: true,
+              );
+              gotServerOffset = true;
+              break;
+            }
+          } else {
+            debugPrint('[SK ESPORTS] Server offset endpoint unavailable '
+                '(HTTP ${offsetRes.statusCode}); using safe clock fallback.');
+            // HTTP 400 from the REST-only /.info path is not recoverable by
+            // repeating the same request, so continue with local UTC time.
+            if (offsetRes.statusCode >= 400 && offsetRes.statusCode < 500) break;
+          }
+        } catch (error) {
+          debugPrint('[SK ESPORTS] Server offset attempt ${attempt + 1} failed: $error');
+        }
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 350));
+        }
       }
-      final offsetValue = jsonDecode(offsetRes.body);
-      final serverOffset = offsetValue is num ? offsetValue.toInt() : 0;
-      final serverNow = DateTime.fromMillisecondsSinceEpoch(
-        DateTime.now().millisecondsSinceEpoch + serverOffset,
-        isUtc: true,
-      );
+      if (!gotServerOffset) {
+        serverNow = DateTime.now().toUtc();
+        debugPrint('[SK ESPORTS] Using device UTC clock for daily reward reset.');
+      }
+
       final ist = serverNow.add(const Duration(hours: 5, minutes: 30));
       final rewardDay = ist.hour < 5 ? ist.subtract(const Duration(days: 1)) : ist;
       final today = '${rewardDay.year.toString().padLeft(4, '0')}-${rewardDay.month.toString().padLeft(2, '0')}-${rewardDay.day.toString().padLeft(2, '0')}';
@@ -2063,7 +2088,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _num(_rewards['rewardDayStart']) == dayStart) return true;
 
       // PATCH only reset fields. Never PUT a stale full rewards snapshot:
-      // this keeps current coins/bonusWallet safe during concurrent changes.
+      // current coins and bonusWallet remain untouched during daily reset.
       final patch = <String, dynamic>{
         'rewardDayKey': today,
         'rewardDayStart': dayStart,
@@ -2112,7 +2137,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) setState(() {});
         return true;
       }
-      _lastRewardsWriteError = 'Reset verification failed: server reward day did not match';
+      _lastRewardsWriteError = 'Reset verification failed: reward day did not match';
       debugPrint('[SK ESPORTS] $_lastRewardsWriteError');
       return false;
     } catch (error, stackTrace) {
