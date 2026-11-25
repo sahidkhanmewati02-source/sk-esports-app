@@ -2288,12 +2288,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _claimReward(String kind) async {
     if (_rewards.isEmpty) await _ensureRewards();
     if (!await _resetRewardsForNewIstDay()) {
-      final detail = _lastRewardsWriteError.isEmpty ? 'Firebase ne write reject kiya, lekin response body empty thi.' : _lastRewardsWriteError;
-      debugPrint('[SK ESPORTS] Daily reset snackbar detail: $detail');
-      if (detail.contains('HTTP 401') || detail.contains('HTTP 403')) {
-        return _msg('Session verify nahi hua. Please logout karke dobara login karein.');
-      }
-      return _msg('Daily rewards reset nahi ho paya. Refresh karke dobara try karein.');
+      final detail = _lastRewardsWriteError.isEmpty
+          ? 'Unknown reset failure. Check internet and refresh.'
+          : _lastRewardsWriteError;
+      debugPrint('[SK ESPORTS] Daily reset failed; exact cause: $detail');
+      // Do not label every 401/403 as an expired login. RTDB also returns
+      // permission-denied when a database rule rejects an otherwise valid
+      // Firebase ID token. Show the actual response so the failing rule/path
+      // can be corrected without asking users to log out repeatedly.
+      final readable = detail.length > 180 ? detail.substring(0, 180) : detail;
+      return _msg('Reward reset error: $readable');
     }
     final current = Map<String, dynamic>.from(_rewards);
     final next = Map<String, dynamic>.from(current);
