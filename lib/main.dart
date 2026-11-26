@@ -394,7 +394,17 @@ class _AuthScreenState extends State<AuthScreen> {
           }
         }
         if (referredBy == null) {
-          throw Exception('Referral code "$code" valid nahi mila. Registration rok di hai taaki referral miss na ho. Admin apne account mein login karke Profile ek baar khole, phir dobara try karein.');
+          // This is a brand-new Auth account. Roll it back so an invalid supplied
+          // referral never leaves an orphan account that cannot enter the app.
+          final rollback = await http.post(
+            Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$kApiKey'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'idToken': token}),
+          );
+          if (rollback.statusCode != 200) {
+            throw Exception('Referral "$code" verify nahi hua aur temporary account rollback bhi fail hua. Firebase Auth mein is Gmail ka account check karein (HTTP ${rollback.statusCode}).');
+          }
+          throw Exception('Referral code "$code" valid nahi mila. Registration cancel kar di hai; koi referral miss nahi hoga. Super Admin ek baar login karke Profile khole, phir dobara try karein.');
         }
       }
       final sp = await SharedPreferences.getInstance();
@@ -403,7 +413,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
       if (!_isLogin) {
         final ownReferralCode = await _createUniqueReferralCode(name: _name.text.trim(), uid: uid, token: token);
-        await http.put(
+        final createdAt = DateTime.now().millisecondsSinceEpoch;
+        final profileSave = await http.put(
           Uri.parse('$kDbUrl/users/$uid.json?auth=$token'),
           body: jsonEncode({
             'email': e,
@@ -416,8 +427,23 @@ class _AuthScreenState extends State<AuthScreen> {
             if (referredBy != null) 'referredBy': referredBy,
           }),
         );
-        await http.put(Uri.parse('$kDbUrl/referralCodes/$uid.json?auth=$token'), body: jsonEncode({'uid': uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
-        await http.put(Uri.parse('$kDbUrl/referralLookup/$ownReferralCode.json?auth=$token'), body: jsonEncode({'uid': uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
+        if (profileSave.statusCode < 200 || profileSave.statusCode >= 300) {
+          throw Exception('Player profile save failed (HTTP ${profileSave.statusCode}). Existing Firebase data overwrite nahi kiya.');
+        }
+        final legacySave = await http.put(
+          Uri.parse('$kDbUrl/referralCodes/$uid.json?auth=$token'),
+          body: jsonEncode({'uid': uid, 'createdAt': createdAt}),
+        );
+        if (legacySave.statusCode < 200 || legacySave.statusCode >= 300) {
+          throw Exception('Profile save ho gaya, lekin legacy referral index save nahi hua (HTTP ${legacySave.statusCode}).');
+        }
+        final lookupSave = await http.put(
+          Uri.parse('$kDbUrl/referralLookup/$ownReferralCode.json?auth=$token'),
+          body: jsonEncode({'uid': uid, 'createdAt': createdAt}),
+        );
+        if (lookupSave.statusCode < 200 || lookupSave.statusCode >= 300) {
+          throw Exception('Profile save ho gaya, lekin referral lookup save nahi hua (HTTP ${lookupSave.statusCode}). Code profile mein safe hai.');
+        }
         if (referredBy != null) {
           final referralRes = await http.put(
             Uri.parse('$kDbUrl/referralCodes/$referredBy/referrals/$uid.json?auth=$token'),
