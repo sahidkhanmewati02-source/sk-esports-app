@@ -26,27 +26,6 @@
           "$txnId": {
             ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && !data.exists()))"
           }
-        },
-        "rewards": {
-          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && newData.child('bonusWallet').isNumber() && newData.child('bonusWallet').val() >= 0 && (!data.exists() ? newData.child('bonusWallet').val() === 0 : newData.child('bonusWallet').val() <= data.child('bonusWallet').val()) && newData.child('discountMatchId').isString() && newData.child('discountAmount').isNumber() && newData.child('discountAmount').val() >= 0 && newData.child('discountsUsed').exists() && newData.child('updatedAt').val() === now && (!data.exists() || newData.child('bonusWallet').val() === data.child('bonusWallet').val() || (newData.child('discountAmount').val() > 0 && newData.child('bonusWallet').val() === data.child('bonusWallet').val() - newData.child('discountAmount').val()))))",
-          ".validate": "newData.hasChildren(['bonusWallet','discountMatchId','discountAmount','discountsUsed','updatedAt'])",
-          "bonusWallet": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
-          },
-          "discountMatchId": {
-            ".validate": "newData.isString()"
-          },
-          "discountAmount": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
-          },
-          "discountsUsed": {
-            "$matchId": {
-              ".validate": "newData.isBoolean()"
-            }
-          },
-          "updatedAt": {
-            ".validate": "newData.isNumber() && newData.val() > 0"
-          }
         }
       }
     },
@@ -57,7 +36,6 @@
         "players": {
           "$uid": {
             ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || (auth.uid === $uid && !data.exists() && newData.child('teamSize').val() === ((root.child('matches').child($matchId).child('mode').val() === 'SQUAD' || root.child('matches').child($matchId).child('mode').val() === 'Squad' || root.child('matches').child($matchId).child('mode').val() === 'squad' || root.child('matches').child($matchId).child('mode').val() === 'SQUADS' || root.child('matches').child($matchId).child('mode').val() === 'Squads') ? 4 : ((root.child('matches').child($matchId).child('mode').val() === 'DUO' || root.child('matches').child($matchId).child('mode').val() === 'Duo' || root.child('matches').child($matchId).child('mode').val() === 'duo' || root.child('matches').child($matchId).child('mode').val() === 'DUOS' || root.child('matches').child($matchId).child('mode').val() === 'Duos') ? 2 : 1)) && newData.child('baseFee').val() === root.child('matches').child($matchId).child('fee').val() * newData.child('teamSize').val() && newData.child('feePaid').val() === newData.child('baseFee').val() && (!root.child('matches').child($matchId).child('adminSelectionEnabled').val() || (newData.child('selectedAdminUid').isString() && newData.child('selectedAdminUid').val().length > 0))))",
-            ".validate": "newData.hasChildren(['ign','bgmiId']) && (!newData.child('slotNumber').exists() || (newData.child('slotNumber').isNumber() && newData.child('slotNumber').val() >= 1 && newData.child('slotNumber').val() % 1 === 0)) && (!newData.child('teamSize').exists() || (newData.child('teamSize').isNumber() && (newData.child('teamSize').val() === 1 || newData.child('teamSize').val() === 2 || newData.child('teamSize').val() === 4))) && (!newData.child('baseFee').exists() || newData.child('baseFee').isNumber()) && (!newData.child('bonusDiscount').exists() || newData.child('bonusDiscount').isNumber()) && (!newData.child('feePaid').exists() || newData.child('feePaid').isNumber())",
             "slotNumber": {
               ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
               ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() % 1 === 0"
@@ -66,7 +44,8 @@
               "$index": {
                 ".validate": "newData.hasChildren(['ign','bgmiId'])"
               }
-            }
+            },
+            ".validate": "newData.hasChildren(['ign','bgmiId']) && (!newData.child('slotNumber').exists() || (newData.child('slotNumber').isNumber() && newData.child('slotNumber').val() >= 1 && newData.child('slotNumber').val() % 1 === 0)) && (!newData.child('teamSize').exists() || (newData.child('teamSize').isNumber() && (newData.child('teamSize').val() === 1 || newData.child('teamSize').val() === 2 || newData.child('teamSize').val() === 4))) && (!newData.child('baseFee').exists() || newData.child('baseFee').isNumber()) && (!newData.child('feePaid').exists() || newData.child('feePaid').isNumber())"
           }
         },
         "joined": {
