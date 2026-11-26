@@ -28,34 +28,40 @@ Future<String> _createUniqueReferralCode({required String name, required String 
   final base = admin ? 'SKSAHID' : (cleaned.isEmpty ? 'PLAYER' : cleaned.substring(0, math.min(6, cleaned.length)));
   final random = math.Random.secure();
 
-  Future<String?> findFreeCode(String candidate) async {
-    final check = await http.get(Uri.parse('$kDbUrl/referralLookup/$candidate.json?auth=$token'));
-    if (check.statusCode != 200) {
-      throw Exception('Referral lookup read failed (HTTP ${check.statusCode}). Firebase Rules mein referralLookup read permission check karein. Response: ${check.body}');
-    }
-    if (check.body.trim() == 'null') return candidate;
-    final existing = jsonDecode(check.body);
-    if (existing is Map && existing['uid']?.toString() == uid) return candidate;
-    return null;
+  // One authenticated read replaces up to 120 sequential REST requests.
+  final response = await http.get(
+    Uri.parse('$kDbUrl/referralLookup.json?auth=$token'),
+  ).timeout(const Duration(seconds: 20));
+  if (response.statusCode != 200) {
+    throw Exception('Referral lookup read failed (HTTP ${response.statusCode}). Firebase Rules mein referralLookup read permission check karein.');
+  }
+  final decoded = response.body.trim() == 'null' ? <String, dynamic>{} : jsonDecode(response.body);
+  if (decoded is! Map) {
+    throw Exception('Referral lookup database format invalid hai. Existing data overwrite nahi kiya.');
+  }
+  final occupied = Map<String, dynamic>.from(decoded);
+
+  bool isFree(String candidate) {
+    final current = occupied[candidate];
+    if (current == null) return true;
+    return current is Map && current['uid']?.toString() == uid;
   }
 
-  if (admin) {
-    final fixed = await findFreeCode('SKSAHID');
-    if (fixed != null) return fixed;
-  }
-  for (var i = 0; i < 60; i++) {
+  if (admin && isFree('SKSAHID')) return 'SKSAHID';
+
+  final tried = <String>{};
+  for (var i = 0; i < 500; i++) {
     final candidate = '$base${100 + random.nextInt(900)}';
-    final free = await findFreeCode(candidate);
-    if (free != null) return free;
+    if (tried.add(candidate) && isFree(candidate)) return candidate;
   }
+
   final suffix = uid.length > 5 ? uid.substring(uid.length - 5) : uid;
   final fallback = 'SK$suffix'.toUpperCase();
-  for (var i = 0; i < 60; i++) {
+  for (var i = 0; i < 500; i++) {
     final candidate = '$fallback${100 + random.nextInt(900)}';
-    final free = await findFreeCode(candidate);
-    if (free != null) return free;
+    if (tried.add(candidate) && isFree(candidate)) return candidate;
   }
-  throw Exception('60+ referral code candidates already exist. Koi existing code overwrite nahi kiya.');
+  throw Exception('Referral code ke liye unique slot nahi mila. Koi existing code overwrite nahi kiya.');
 }
 
 Uri? _resolveAdTarget(String raw) {
