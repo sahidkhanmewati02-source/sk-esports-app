@@ -817,16 +817,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final uRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
       if (uRes.statusCode != 200) throw Exception('Profile read failed (${uRes.statusCode}); UID/session ya Rules mismatch ho sakta hai. Data overwrite nahi kiya.');
-      if (uRes.body.trim() == 'null') {
+      var profileBody = uRes.body;
+      if (profileBody.trim() == 'null') {
         await _recoverMissingProfileInHome();
         final recovered = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
         if (recovered.statusCode != 200 || recovered.body.trim() == 'null') {
           throw Exception('Is UID ka profile abhi bhi nahi mila. Recovery result: HTTP ${recovered.statusCode} ${recovered.body}');
         }
-        uRes.body = recovered.body;
+        profileBody = recovered.body;
       }
       {
-        final d = jsonDecode(uRes.body);
+        final d = jsonDecode(profileBody);
         _ign = d['ign'] ?? 'SK_Player';
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
