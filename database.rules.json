@@ -49,6 +49,7 @@
           }
         },
         "referralCode": {
+          ".read": "auth != null",
           ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === $uid)",
           ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{4,12}$/)"
         }
