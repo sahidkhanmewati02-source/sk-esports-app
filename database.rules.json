@@ -1,12 +1,12 @@
 {
   "rules": {
-    ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
-    ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+    ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val())",
+    ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val())",
     "users": {
-      ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
+      ".read": "auth != null && ((auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val()) || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
       "$uid": {
-        ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || auth.uid === $uid)",
-        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && !data.exists() && newData.child('wallet').val() === 0 && !newData.child('role').exists()))",
+        ".read": "auth != null && ((auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val()) || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || auth.uid === $uid)",
+        ".write": "auth != null && ((auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val()) || (auth.uid === $uid && !data.exists() && newData.child('wallet').val() === 0 && !newData.child('role').exists()))",
         "wallet": {
           ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === $uid && data.exists() && data.isNumber() && newData.isNumber() && newData.val() < data.val()))",
           ".validate": "newData.isNumber() && newData.val() >= 0"
@@ -100,11 +100,11 @@
     },
     "config": {
       ".read": "auth != null",
-      ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'"
+      ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val())"
     },
     "match_hisaab": {
-      ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
-      ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'"
+      ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val())",
+      ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val())"
     },
     "chatModeration": {
       ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
@@ -135,7 +135,7 @@
     "referralLookup": {
       ".read": "auth != null",
       "$code": {
-        ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid && root.child('users').child(auth.uid).child('referralCode').val() === $code) || (auth.token.email === 'sahidkhanmewati02@gmail.com' && newData.child('uid').isString()))",
+        ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid && root.child('users').child(auth.uid).child('referralCode').val() === $code) || ((auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val()) && newData.child('uid').isString()))",
         ".validate": "newData.hasChildren(['uid','createdAt']) && newData.child('uid').isString() && newData.child('createdAt').isNumber()"
       }
     }
