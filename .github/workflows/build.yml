@@ -39,7 +39,25 @@ jobs:
             exit 1
           fi
 
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/sk-esports-release.jks
+          python3 - <<'PY'
+          import os, re, base64, sys
+          raw = os.environ["ANDROID_KEYSTORE_BASE64"]
+          compact = re.sub(r"\\s+", "", raw).replace("-", "+").replace("_", "/")
+          compact += "=" * ((4 - len(compact) % 4) % 4)
+          try:
+              decoded = base64.b64decode(compact, validate=True)
+          except Exception as exc:
+              invalid = sorted(set(ch for ch in compact if ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="))
+              print("ANDROID_KEYSTORE_BASE64 is invalid. Remove spaces/prompt text and re-copy only the Base64 output.")
+              print("Secret length after whitespace cleanup:", len(compact))
+              print("Invalid character count:", sum(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=" for ch in compact))
+              raise SystemExit("Keystore Base64 decode failed: " + str(exc))
+          if not decoded:
+              raise SystemExit("Decoded keystore is empty.")
+          with open("android/app/sk-esports-release.jks", "wb") as f:
+              f.write(decoded)
+          print("Keystore Base64 decoded successfully; file bytes:", len(decoded))
+          PY
           test -s android/app/sk-esports-release.jks
           cat > android/key.properties <<EOF
           storePassword=$ANDROID_KEYSTORE_PASSWORD
