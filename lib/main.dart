@@ -1107,9 +1107,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _msg('Finance load warning: ' + e.toString());
     }
     if (!mounted) return;
-    await showDialog<void>(
+    await Navigator.push<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
+      builder: (ctx) => Scaffold(
+        appBar: AppBar(
+          title: const Text('SK eSports Finance', style: TextStyle(color: Color(0xFFFF9800))),
+          backgroundColor: const Color(0xFF161B22),
+        ),
+        body: StatefulBuilder(
         builder: (ctx, setD) {
           final collection = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
           final prizes = accounts.fold<int>(0, (n, a) => n + _num(a['prizeSent']));
@@ -1210,17 +1215,14 @@ class _HomeScreenState extends State<HomeScreen> {
             }
             page = ListView(children: widgets);
           }
-          return AlertDialog(
-            title: const Text('SK eSports Finance', style: TextStyle(color: Color(0xFFFF9800))),
-            content: SizedBox(width: double.maxFinite, height: 530, child: Column(children: [
-              SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
-                for (var i = 0; i < 5; i++) Padding(padding: const EdgeInsets.only(right: 4), child: ChoiceChip(label: Text(['Overview', 'Match Manager', 'All Players', 'Expenses', 'Payments'][i]), selected: tab == i, onSelected: (_) => setD(() => tab = i))),
-              ])),
-              Expanded(child: page),
+          return Column(children: [
+            SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+              for (var i = 0; i < 5; i++) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(['Overview', 'Match Manager', 'All Players', 'Expenses', 'Payments'][i]), selected: tab == i, onSelected: (_) => setD(() => tab = i))),
             ])),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-          );
+            Expanded(child: page),
+          ]);
         },
+      ),
       ),
     );
   }
@@ -2961,8 +2963,8 @@ class _HomeScreenState extends State<HomeScreen> {
     ]),
 ]; 
     final navPages = isAdmin
-        ? [pages[0], pages[1], pages[3], pages[4], pages[2]]
-        : [pages[0], pages[1], pages[3], pages[2]];
+        ? [pages[0], pages[3], pages[4], pages[2]]
+        : [pages[0], pages[3], pages[2]];
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
@@ -2972,9 +2974,21 @@ class _HomeScreenState extends State<HomeScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
-              child: Text(
-                '₹$_wallet',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 16),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => Scaffold(
+                    appBar: AppBar(
+                      title: const Text('My Wallet'),
+                      backgroundColor: const Color(0xFF161B22),
+                    ),
+                    body: pages[1],
+                  )));
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  child: Text('₹$_wallet', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 17)),
+                ),
               ),
             ),
           ),
@@ -2988,7 +3002,6 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: (i) => setState(() => _tab = i),
         items: [
           const BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
-          const BottomNavigationBarItem(icon: Icon(Icons.wallet), label: 'Wallet'),
           const BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
           if (isAdmin) const BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
           const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
