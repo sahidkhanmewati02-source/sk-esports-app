@@ -1178,8 +1178,22 @@ class _HomeScreenState extends State<HomeScreen> {
             backgroundColor: const Color(0xFF161B22),
           ),
           body: StatefulBuilder(
-        builder: (ctx, setD) {
-          final collection = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
+            builder: (ctx, setD) {
+              refreshFinance = setD;
+              if (loading) return const Center(child: CircularProgressIndicator());
+              if (loadError != null && accounts.isEmpty) {
+                return Center(child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.error_outline, color: Colors.orange, size: 36),
+                    const SizedBox(height: 12),
+                    Text('Finance load failed: $loadError', textAlign: TextAlign.center),
+                    const SizedBox(height: 12),
+                    ElevatedButton(onPressed: () => _showFinanceDashboard(), child: const Text('Retry')),
+                  ]),
+                ));
+              }
+              final collection = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
           final prizes = accounts.fold<int>(0, (n, a) => n + _num(a['prizeSent']));
           final expenses = accounts.fold<int>(0, (n, a) => n + _matchExpenses(a));
           final net = collection - prizes - expenses;
@@ -1315,44 +1329,35 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     Future<void>(() async {
-          try {
-            // Load every match account and both transaction lists concurrently.
-            // The old sequential awaits made Finance feel unresponsive as match count grew.
-            final matchJobs = _matches.map((m) async {
-              final h = await _refreshMatchHisaabFromRoster(m);
-              return <String, dynamic>{
-                'id': m['id'].toString(),
-                'title': m['title'] ?? 'Match',
-                'match': m,
-                ...h,
-              };
-            }).toList();
-            final results = await Future.wait<dynamic>([
-              ...matchJobs,
-              http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')),
-              http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')),
-            ]);
-            final matchCount = matchJobs.length;
-            for (var i = 0; i < matchCount; i++) {
-              accounts.add(results[i] as Map);
-            }
-            final d = results[matchCount] as http.Response;
-            if (d.statusCode == 200 && d.body != 'null') {
-              final data = jsonDecode(d.body);
-              if (data is Map) {
-                data.forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
-              }
-            }
-            final w = results[matchCount + 1] as http.Response;
-            if (w.statusCode == 200 && w.body != 'null') {
-              final data = jsonDecode(w.body);
-              if (data is Map) {
-                data.forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
-              }
-            }
-          } catch (e) {
-            _msg('Finance load warning: ' + e.toString());
-          }
+      try {
+        final matchJobs = _matches.map((m) async {
+          final h = await _refreshMatchHisaabFromRoster(m);
+          return <String, dynamic>{
+            'id': m['id'].toString(),
+            'title': m['title'] ?? 'Match',
+            'match': m,
+            ...h,
+          };
+        }).toList();
+        final results = await Future.wait<dynamic>([
+          ...matchJobs,
+          http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')),
+          http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')),
+        ]);
+        final matchCount = matchJobs.length;
+        for (var i = 0; i < matchCount; i++) {
+          accounts.add(results[i] as Map);
+        }
+        final d = results[matchCount] as http.Response;
+        if (d.statusCode == 200 && d.body != 'null') {
+          final data = jsonDecode(d.body);
+          if (data is Map) data.forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
+        }
+        final w = results[matchCount + 1] as http.Response;
+        if (w.statusCode == 200 && w.body != 'null') {
+          final data = jsonDecode(w.body);
+          if (data is Map) data.forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
+        }
       } catch (e) {
         loadError = e.toString();
       }
