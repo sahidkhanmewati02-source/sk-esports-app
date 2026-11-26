@@ -2095,9 +2095,91 @@ class _HomeScreenState extends State<HomeScreen> {
     ).then((_) => searchC.dispose());
   }
 
+  Future<void> _configureMatchVotingAdmins(Map match) async {
+    if (!isSuperAdmin) return _msg('Voting Admins sirf Super Admin set kar sakta hai.');
+    List<Map<String,dynamic>> available;
+    try {
+      available = await _loadRegisteredAdmins();
+    } catch (e) {
+      return _msg(e.toString().replaceAll('Exception: ', ''));
+    }
+    final existing = match['votingAdmins'] is List
+        ? List<Map<String,dynamic>>.from((match['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)))
+        : <Map<String,dynamic>>[];
+    final selected = <String>{...existing.map((x) => (x['uid'] ?? '').toString()).where((x) => x.isNotEmpty)};
+    bool enabled = match['adminSelectionEnabled'] == true;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) {
+        return AlertDialog(
+          title: Text('Voting Admins • ${match['title'] ?? 'Match'}'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 440,
+            child: Column(children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Enable Admin Selection for this match'),
+                subtitle: const Text('OFF = players join without selecting an admin.'),
+                value: enabled,
+                onChanged: (v) => setDialogState(() => enabled = v),
+              ),
+              const Divider(),
+              const Align(alignment: Alignment.centerLeft, child: Text('Select only the Admins players can vote for:', style: TextStyle(fontWeight: FontWeight.bold))),
+              const SizedBox(height: 6),
+              Expanded(child: ListView(
+                children: available.map((a) {
+                  final uid = (a['uid'] ?? '').toString();
+                  final checked = selected.contains(uid);
+                  return CheckboxListTile(
+                    dense: true,
+                    value: checked,
+                    title: Text((a['name'] ?? 'Admin').toString()),
+                    subtitle: Text(a['isSuperAdmin'] == true ? 'Super Admin' : 'Co-Admin'),
+                    onChanged: (v) => setDialogState(() {
+                      if (v == true) { selected.add(uid); } else { selected.remove(uid); }
+                    }),
+                  );
+                }).toList(),
+              )),
+              if (enabled && selected.isEmpty)
+                const Text('Selection enabled hai: kam se kam 1 Admin select karein.', style: TextStyle(color: Colors.orange, fontSize: 12)),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                if (enabled && selected.isEmpty) return _msg('Admin Selection ON hai. Kam se kam 1 Admin select karein.');
+                final chosen = available.where((a) => selected.contains((a['uid'] ?? '').toString())).map((a) => {'uid': a['uid'], 'name': a['name'], 'role': a['role'], 'isSuperAdmin': a['isSuperAdmin'] == true}).toList();
+                final payload = {'adminSelectionEnabled': enabled, 'votingAdmins': chosen};
+                final res = await http.patch(
+                  Uri.parse('$kDbUrl/matches/${match['id']}.json?auth=${widget.token}'),
+                  body: jsonEncode(payload),
+                );
+                if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Voting Admin settings save nahi hui. Firebase Rules check karein.');
+                match.addAll(payload);
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (mounted) setState(() {});
+                _msg(enabled ? '${chosen.length} Voting Admins is match ke liye save ho gaye.' : 'Is match mein Admin Selection OFF hai.');
+              },
+              child: const Text('Save Match Admins'),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
   Future<void> _join(Map m) async {
-    List<Map<String,dynamic>> adminOptions;
-    try { adminOptions = await _loadRegisteredAdmins(); } catch(e) { _msg(e.toString().replaceAll('Exception: ','')); return; }
+    final adminSelectionEnabled = m['adminSelectionEnabled'] == true;
+    final adminOptions = adminSelectionEnabled && m['votingAdmins'] is List
+        ? List<Map<String,dynamic>>.from((m['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)))
+        : <Map<String,dynamic>>[];
+    if (adminSelectionEnabled && adminOptions.isEmpty) {
+      _msg('Is match ke Voting Admins Super Admin ne abhi set nahi kiye. Admin se configure karwayein.');
+      return;
+    }
     String selectedAdminUid = '';
     final teamSize = _teamSize(m);
     final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
@@ -2130,13 +2212,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   const Text('Rule: Har teammate ki BGMI Level 30+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
                   const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: selectedAdminUid.isEmpty ? null : selectedAdminUid,
-                    decoration: const InputDecoration(labelText: 'Select Admin (Required)', border: OutlineInputBorder()),
-                    items: adminOptions.map((x) => DropdownMenuItem<String>(value:x['uid'].toString(),child:Text((x['name'] ?? 'Admin').toString()+(x['isSuperAdmin']==true?' • Super Admin':' • Co-Admin'),overflow:TextOverflow.ellipsis))).toList(),
-                    onChanged:(v)=>setDialogState(()=>selectedAdminUid=v ?? ''),
-                  ),
-                  const SizedBox(height:10),
+                  if (adminSelectionEnabled) ...[
+                    DropdownButtonFormField<String>(
+                      value: selectedAdminUid.isEmpty ? null : selectedAdminUid,
+                      decoration: const InputDecoration(labelText: 'Select Admin (Required)', border: OutlineInputBorder()),
+                      items: adminOptions.map((x) => DropdownMenuItem<String>(value:x['uid'].toString(),child:Text((x['name'] ?? 'Admin').toString()+(x['isSuperAdmin']==true?' • Super Admin':' • Co-Admin'),overflow:TextOverflow.ellipsis))).toList(),
+                      onChanged:(v)=>setDialogState(()=>selectedAdminUid=v ?? ''),
+                    ),
+                    const SizedBox(height:10),
+                  ],
                   for (var i = 0; i < teamSize; i++) ...[
                     Align(alignment: Alignment.centerLeft, child: Text(i == 0 ? 'Team Leader' : 'Teammate ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
                     const SizedBox(height: 5),
@@ -2173,8 +2257,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
                 onPressed: () async {
-                  if(selectedAdminUid.isEmpty) return _msg('Join confirm se pehle Admin select karein.');
-                  final selectedAdmin=adminOptions.firstWhere((x)=>x['uid'].toString()==selectedAdminUid);
+                  if(adminSelectionEnabled && selectedAdminUid.isEmpty) return _msg('Join confirm se pehle Admin select karein.');
+                  final selectedAdmin = adminSelectionEnabled
+                      ? adminOptions.firstWhere((x)=>x['uid'].toString()==selectedAdminUid)
+                      : <String,dynamic>{};
                   final members = <Map<String, dynamic>>[];
                   for (var i = 0; i < teamSize; i++) {
                     final ign = nameControllers[i].text.trim();
@@ -2211,8 +2297,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     'feePaid': payable,
                     'baseFee': baseTotal,
                     'bonusDiscount': discount,
-                    'selectedAdminUid': selectedAdminUid,
-                    'selectedAdminName': (selectedAdmin['name'] ?? 'Admin').toString(),
+                    if (adminSelectionEnabled) 'selectedAdminUid': selectedAdminUid,
+                    if (adminSelectionEnabled) 'selectedAdminName': (selectedAdmin['name'] ?? 'Admin').toString(),
                   };
                   final txn = {
                     'title': 'Joined: ${m['title']}',
@@ -2843,6 +2929,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           onPressed: () => _showPlayers(m),
                           style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
                           child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                        ),
+                        const SizedBox(width: 6),
+                        if (isSuperAdmin) OutlinedButton.icon(
+                          onPressed: () => _configureMatchVotingAdmins(m),
+                          icon: const Icon(Icons.how_to_vote, size: 14),
+                          label: Text(m['adminSelectionEnabled'] == true ? 'Edit Voting Admins' : 'Set Voting Admins', style: const TextStyle(fontSize: 11)),
                         ),
                         const SizedBox(width: 6),
                         OutlinedButton(onPressed: () => _showAdminSelectionLeaderboard(m), child: const Text('Admin Picks', style: TextStyle(fontSize: 11))),
