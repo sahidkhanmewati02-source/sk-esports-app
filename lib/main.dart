@@ -2169,7 +2169,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ? List<Map<String,dynamic>>.from((match['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)))
         : <Map<String,dynamic>>[];
     final selected = <String>{...existing.map((x) => (x['uid'] ?? '').toString()).where((x) => x.isNotEmpty)};
-    bool enabled = match['adminSelectionEnabled'] == true;
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) {
@@ -2179,15 +2178,10 @@ class _HomeScreenState extends State<HomeScreen> {
             width: double.maxFinite,
             height: 440,
             child: Column(children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Enable Admin Selection for this match'),
-                subtitle: const Text('OFF = players join without selecting an admin.'),
-                value: enabled,
-                onChanged: (v) => setDialogState(() => enabled = v),
-              ),
+              const Align(alignment: Alignment.centerLeft, child: Text('Select the admins players must choose before joining this match:', style: TextStyle(fontWeight: FontWeight.bold))),
+              const SizedBox(height: 6),
+              const Text('At least one selected admin makes selection compulsory. Leave all unchecked to turn voting OFF.', style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
               const Divider(),
-              const Align(alignment: Alignment.centerLeft, child: Text('Select only the Admins players can vote for:', style: TextStyle(fontWeight: FontWeight.bold))),
               const SizedBox(height: 6),
               Expanded(child: ListView(
                 children: available.map((a) {
@@ -2212,8 +2206,8 @@ class _HomeScreenState extends State<HomeScreen> {
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () async {
-                if (enabled && selected.isEmpty) return _msg('Admin Selection ON hai. Kam se kam 1 Admin select karein.');
                 final chosen = available.where((a) => selected.contains((a['uid'] ?? '').toString())).map((a) => {'uid': a['uid'], 'name': a['name'], 'role': a['role'], 'isSuperAdmin': a['isSuperAdmin'] == true}).toList();
+                final enabled = chosen.isNotEmpty;
                 final payload = {'adminSelectionEnabled': enabled, 'votingAdmins': chosen};
                 final res = await http.patch(
                   Uri.parse('$kDbUrl/matches/${match['id']}.json?auth=${widget.token}'),
@@ -2223,7 +2217,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 match.addAll(payload);
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (mounted) setState(() {});
-                _msg(enabled ? '${chosen.length} Voting Admins is match ke liye save ho gaye.' : 'Is match mein Admin Selection OFF hai.');
+                _msg(enabled ? '${chosen.length} Voting Admins saved. Players must select one before joining.' : 'Is match mein Admin Voting OFF hai.');
               },
               child: const Text('Save Match Admins'),
             ),
@@ -2234,10 +2228,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _join(Map m) async {
-    final adminSelectionEnabled = m['adminSelectionEnabled'] == true;
-    final adminOptions = adminSelectionEnabled && m['votingAdmins'] is List
-        ? List<Map<String,dynamic>>.from((m['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)))
+    final adminOptions = m['votingAdmins'] is List
+        ? List<Map<String,dynamic>>.from((m['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)).where((x) => (x['uid'] ?? '').toString().isNotEmpty))
         : <Map<String,dynamic>>[];
+    // Any configured admin list makes voting compulsory, even on older match records.
+    final adminSelectionEnabled = m['adminSelectionEnabled'] == true || adminOptions.isNotEmpty;
     if (adminSelectionEnabled && adminOptions.isEmpty) {
       _msg('Is match ke Voting Admins Super Admin ne abhi set nahi kiye. Admin se configure karwayein.');
       return;
@@ -2245,27 +2240,15 @@ class _HomeScreenState extends State<HomeScreen> {
     String selectedAdminUid = '';
     final teamSize = _teamSize(m);
     final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
-    final matchId = m['id'].toString();
-    final usedDiscounts = _rewards['discountsUsed'] is Map ? _rewards['discountsUsed'] as Map : <dynamic, dynamic>{};
-    final hasDiscountReservation = usedDiscounts[matchId] == true && _rewards['discountMatchId']?.toString() == matchId && _num(_rewards['discountAmount']) > 0;
-    final previouslyDiscounted = usedDiscounts[matchId] == true && !hasDiscountReservation;
-    final lastDiscountMatchId = (_rewards['discountMatchId'] ?? '').toString();
-    final lastDiscountConsumed = lastDiscountMatchId.isNotEmpty && _matches.any((x) => x['id']?.toString() == lastDiscountMatchId && x['players'] is Map && (x['players'] as Map).containsKey(widget.uid));
-    final hasOtherReservation = lastDiscountMatchId.isNotEmpty && lastDiscountMatchId != matchId && _num(_rewards['discountAmount']) > 0 && !lastDiscountConsumed;
     final nameControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 ? _ign : ''));
     final idControllers = List.generate(teamSize, (i) => TextEditingController(text: i == 0 && _bgmiId != 'Not Set' ? _bgmiId : ''));
-    var useBonus = hasDiscountReservation || (!hasOtherReservation && _num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           final fee = _num(m['fee']);
           final baseTotal = fee * teamSize;
-          final maxDiscount = baseTotal ~/ 10;
-          final discount = hasDiscountReservation
-              ? _num(_rewards['discountAmount'])
-              : (useBonus ? math.min(_num(_rewards['bonusWallet']), maxDiscount).toInt() : 0);
-          final payable = baseTotal - discount;
+          final payable = baseTotal;
           return AlertDialog(
             title: Text('Join $mode • ${m['title']}', style: const TextStyle(fontSize: 15)),
             content: SizedBox(
@@ -2291,23 +2274,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     TextField(controller: idControllers[i], keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: InputDecoration(labelText: 'BGMI ID • ${i + 1}', border: const OutlineInputBorder())),
                     const SizedBox(height: 10),
                   ],
-                  if (_num(_rewards['bonusWallet']) > 0 && !previouslyDiscounted && !hasDiscountReservation && !hasOtherReservation) SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: useBonus,
-                    onChanged: (v) => setDialogState(() => useBonus = v),
-                    title: const Text('Use Bonus Wallet discount', style: TextStyle(fontSize: 13)),
-                    subtitle: Text('Max 10%: up to ₹$maxDiscount • Available ₹${_num(_rewards['bonusWallet'])}', style: const TextStyle(fontSize: 11)),
-                  ),
-                  if (hasDiscountReservation) Text('Reserved Bonus discount ₹$discount is ready for this match.', style: const TextStyle(fontSize: 11, color: Color(0xFF00E676))),
-                  if (hasOtherReservation) const Text('Pehle reserved match join complete karein; phir next match discount use hoga.', style: TextStyle(fontSize: 11, color: Colors.amber)),
-                  if (previouslyDiscounted) const Text('Is match mein aapka Bonus discount pehle use ho chuka hai.', style: TextStyle(fontSize: 11, color: Colors.amber)),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('Entry: ₹$fee × $teamSize = ₹$baseTotal'),
-                      Text('Bonus discount: −₹$discount', style: const TextStyle(color: Color(0xFF00E676))),
                       Text('Pay from Main Wallet: ₹$payable', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     ]),
                   ),
@@ -2342,7 +2314,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     return _msg('Main Wallet balance kam hai!');
                   }
                   final oldBalance = _wallet;
-                  final oldBonus = _num(_rewards['bonusWallet']);
                   final playerBalance = oldBalance - payable;
                   final now = DateTime.now();
                   final txnId = now.microsecondsSinceEpoch.toString();
@@ -2358,13 +2329,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     'joinedAt': now.millisecondsSinceEpoch,
                     'feePaid': payable,
                     'baseFee': baseTotal,
-                    'bonusDiscount': discount,
                     if (adminSelectionEnabled) 'selectedAdminUid': selectedAdminUid,
                     if (adminSelectionEnabled) 'selectedAdminName': (selectedAdmin['name'] ?? 'Admin').toString(),
                   };
                   final txn = {
                     'title': 'Joined: ${m['title']}',
-                    'sub': '$mode • $teamSize member(s) • Base ₹$baseTotal • Bonus discount ₹$discount • $dt',
+                    'sub': '$mode • $teamSize member(s) • Entry ₹$baseTotal • $dt',
                     'amt': payable,
                     'status': 'PAID',
                     'time': dt,
@@ -2378,21 +2348,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       'users/${widget.uid}/txns/$txnId': txn,
                       'matches/${m['id']}/players/${widget.uid}': roster,
                       };
-                    if (discount > 0 && !hasDiscountReservation) {
-                      final nextRewards = Map<String, dynamic>.from(_rewards);
-                      final used = nextRewards['discountsUsed'] is Map
-                          ? Map<String, dynamic>.from(nextRewards['discountsUsed'])
-                          : <String, dynamic>{'_init': false};
-                      used[matchId] = true;
-                      nextRewards['discountsUsed'] = used;
-                      nextRewards['discountMatchId'] = matchId;
-                      nextRewards['discountAmount'] = discount;
-                      nextRewards['bonusWallet'] = oldBonus - discount;
-                      nextRewards['updatedAt'] = {'.sv': 'timestamp'};
-                      if (!await _putRewards(nextRewards)) {
-                        return _msg('Bonus discount reserve nahi hua. Main Wallet se payment nahi li gayi.');
-                      }
-                    }
+
                     final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
                     if (res.statusCode < 200 || res.statusCode >= 300) throw Exception('Atomic join fail hua (${res.statusCode}): ${res.body}. Wallet/slot update nahi hua.');
                     if (mounted) setState(() {
@@ -2406,7 +2362,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       m['joined'] = players.length;
                       m['isJoined'] = true;
                     });
-                    _msg('Team slot confirmed! Main Wallet ₹$payable paid; Bonus discount ₹$discount applied.');
+                    _msg('Team slot confirmed! Main Wallet ₹$payable paid.');
                   } catch (err) {
                     _msg(err.toString().replaceAll('Exception: ', ''));
                     _sync();
