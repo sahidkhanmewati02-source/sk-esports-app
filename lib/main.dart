@@ -372,7 +372,30 @@ class _AuthScreenState extends State<AuthScreen> {
             if (old is Map && old['uid'] != uid) referredBy = old['uid'].toString();
           }
         }
-        if (referredBy == null) _msg('Referral code valid nahi mila. Account bina referral ke banaya ja raha hai.');
+        // Legacy recovery for the Super Admin's established custom code.
+        // Read only the configured admin UID and that user's public referralCode field.
+        if (referredBy == null && code == 'SKSAHID') {
+          final adminUidRes = await http.get(
+            Uri.parse('$kDbUrl/config/superAdminUid.json?auth=$token'),
+          );
+          if (adminUidRes.statusCode != 200) {
+            throw Exception('SKSAHID verify nahi hua: Super Admin UID read failed (HTTP ${adminUidRes.statusCode}).');
+          }
+          final adminUid = adminUidRes.body.trim().replaceAll('"', '');
+          if (adminUid.isNotEmpty && adminUid != 'null' && adminUid != uid) {
+            final adminCodeRes = await http.get(
+              Uri.parse('$kDbUrl/users/$adminUid/referralCode.json?auth=$token'),
+            );
+            if (adminCodeRes.statusCode != 200) {
+              throw Exception('SKSAHID verify nahi hua: admin referral field read failed (HTTP ${adminCodeRes.statusCode}).');
+            }
+            final adminCode = adminCodeRes.body.trim().replaceAll('"', '').toUpperCase();
+            if (adminCode == 'SKSAHID') referredBy = adminUid;
+          }
+        }
+        if (referredBy == null) {
+          throw Exception('Referral code "$code" valid nahi mila. Registration rok di hai taaki referral miss na ho. Admin apne account mein login karke Profile ek baar khole, phir dobara try karein.');
+        }
       }
       final sp = await SharedPreferences.getInstance();
       await sp.setString('rt', data['refreshToken']);
