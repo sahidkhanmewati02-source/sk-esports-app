@@ -862,13 +862,9 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             }
           }
-          if (_referralCode.isNotEmpty) {
-            final restoreRes = await http.put(
-              Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'),
-              body: jsonEncode(_referralCode),
-            );
-            if (restoreRes.statusCode < 200 || restoreRes.statusCode >= 300) _msg('Purana referral code lookup mein mila, profile restore permission nahi mili.');
-          }
+          // Use the verified existing lookup as the active code in memory.
+          // Do not write the profile during recovery: this avoids permission failures
+          // and preserves the existing profile and referral records unchanged.
         }
         // Normal refresh never creates/deletes referral records.
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
@@ -2966,13 +2962,18 @@ class _HomeScreenState extends State<HomeScreen> {
       final existing = jsonDecode(check.body);
       if (existing is! Map || existing['uid']?.toString() != targetUid) return _msg('Ye referral code kisi aur player ka hai.');
     }
-    final mapSave = await http.put(newUrl, body: jsonEncode({'uid': targetUid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
-    if (mapSave.statusCode < 200 || mapSave.statusCode >= 300) return _msg('Naya referral lookup save nahi hua.');
-    final profileUrl = Uri.parse(kDbUrl + '/users/' + targetUid + '/referralCode.json?auth=' + widget.token);
-    final profileSave = await http.put(profileUrl, body: jsonEncode(picked));
-    if (profileSave.statusCode < 200 || profileSave.statusCode >= 300) {
-      if (oldCode != picked) await http.delete(newUrl);
-      return _msg('Player profile update nahi hua. Purana code same rakha hai.');
+    // Commit the profile code and lookup entry together. Keep the previous
+    // lookup as a permanent alias so existing referral links/history are not broken.
+    final patch = <String, dynamic>{
+      'users/$targetUid/referralCode': picked,
+      'referralLookup/$picked': {'uid': targetUid, 'createdAt': DateTime.now().millisecondsSinceEpoch},
+    };
+    final save = await http.patch(
+      Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
+      body: jsonEncode(patch),
+    );
+    if (save.statusCode < 200 || save.statusCode >= 300) {
+      return _msg('Referral update reject hua (HTTP ${save.statusCode}). Purana code aur lookup safe rakhe gaye.');
     }
     if (oldCode.isNotEmpty && oldCode != picked) {
       final oldUrl = Uri.parse(kDbUrl + '/referralLookup/' + oldCode + '.json?auth=' + widget.token);
