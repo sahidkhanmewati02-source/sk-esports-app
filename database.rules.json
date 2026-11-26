@@ -134,7 +134,7 @@
     "referralLookup": {
       ".read": "auth != null",
       "$code": {
-        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (auth.uid === newData.child('uid').val() && !data.exists()))",
+        ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid && root.child('users').child(auth.uid).child('referralCode').val() === $code) || (auth.token.email === 'sahidkhanmewati02@gmail.com' && newData.child('uid').isString()))",
         ".validate": "newData.hasChildren(['uid','createdAt']) && newData.child('uid').isString() && newData.child('createdAt').isNumber()"
       }
     }
