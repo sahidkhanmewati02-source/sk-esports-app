@@ -24,7 +24,7 @@ jobs:
           s = open(p, encoding="utf-8").read()
           permission = '<uses-permission android:name="android.permission.INTERNET"/>'
           if permission not in s:
-              s = s.replace("<application", permission + "\\n    <application", 1)
+              s = s.replace("<application", permission + "\n    <application", 1)
           open(p, "w", encoding="utf-8").write(s)
           PY
 
@@ -83,7 +83,7 @@ jobs:
               marker = '    buildTypes {'
               if marker not in s:
                   raise SystemExit("Could not find buildTypes block to apply release signing.")
-              s = s.replace(marker, marker + '\\n        getByName("release") {\\n            signingConfig = signingConfigs.getByName("release")\\n        }', 1)
+              s = s.replace(marker, marker + '\n        getByName("release") {\n            signingConfig = signingConfigs.getByName("release")\n        }', 1)
           p.write_text(s)
           PY
 
