@@ -1089,7 +1089,11 @@ class _HomeScreenState extends State<HomeScreen> {
     try{for(final m in _matches){final h=await _refreshMatchHisaabFromRoster(m);accounts.add({'id':m['id'].toString(),'title':m['title']??'Match','match':m,...h});}final d=await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));if(d.statusCode==200&&d.body!='null')(jsonDecode(d.body) as Map).forEach((k,v){if(v is Map)deposits.add({'id':k,...v});});final w=await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));if(w.statusCode==200&&w.body!='null')(jsonDecode(w.body) as Map).forEach((k,v){if(v is Map)withdrawals.add({'id':k,...v});});}catch(e){_msg('Finance load: '+e.toString());}
     if(!mounted)return;
     await showDialog<void>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD){
-      final c=accounts.fold<int>(0,(n,a)=>n+_num(a['collection'])),p=accounts.fold<int>(0,(n,a)=>n+_num(a['prizeSent'])),x=accounts.fold<int>(0,(n,a)=>n+_matchExpenses(a)),net=c-p-x,players=<Map<String,dynamic>>[];
+      final c = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
+      final p = accounts.fold<int>(0, (n, a) => n + _num(a['prizeSent']));
+      final x = accounts.fold<int>(0, (n, a) => n + _matchExpenses(a));
+      final net = c - p - x;
+      final players = <Map<String, dynamic>>[];
       for(final a in accounts){final m=a['match'] as Map,ps=m['players'] is Map?m['players'] as Map:<dynamic,dynamic>{};for(final e in ps.entries){final v=e.value is Map?Map<String,dynamic>.from(e.value as Map):<String,dynamic>{};players.add({'match':a['title'],...v});}}
       Widget metric(String t,String v)=>Card(child:ListTile(title:Text(t),trailing:Text(v,style:const TextStyle(color:Color(0xFF00E676),fontWeight:FontWeight.bold))));
       Widget page;
