@@ -285,20 +285,6 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  Future<bool> _isEmailVerified(String idToken) async {
-    final res = await http.post(
-      Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=$kApiKey'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'idToken': idToken}),
-    );
-    final data = jsonDecode(res.body);
-    if (res.statusCode != 200) {
-      throw Exception(data['error']?['message'] ?? 'Email verification status check nahi hua.');
-    }
-    final users = data['users'];
-    return users is List && users.isNotEmpty && users.first['emailVerified'] == true;
-  }
-
   Future<void> _recoverMissingProfile({required String uid, required String token, required String email}) async {
     final profileUrl = Uri.parse('$kDbUrl/users/$uid.json?auth=$token');
     final existing = await http.get(profileUrl).timeout(const Duration(seconds: 20));
@@ -369,11 +355,8 @@ class _AuthScreenState extends State<AuthScreen> {
       }
       final String uid = data['localId'], token = data['idToken'];
       if (_isLogin) {
-        final verified = await _isEmailVerified(token);
-        if (!verified) {
-          await _sendVerificationEmail(token);
-          throw Exception('Aapka Gmail abhi verify nahi hua. Inbox/Spam mein verification link check karein; naya link bhej diya hai. Link verify karke phir login karein.');
-        }
+        // Login requires valid Email + Password only.
+        // Keep profile recovery for Auth accounts whose RTDB profile is genuinely missing.
         await _recoverMissingProfile(uid: uid, token: token, email: e);
       }
       String? referredBy;
