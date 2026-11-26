@@ -1185,8 +1185,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (!mounted) return;
     await Navigator.push<void>(
-      context: context,
-      builder: (ctx) => Scaffold(
+      context,
+      MaterialPageRoute<void>(
+        builder: (ctx) => Scaffold(
         appBar: AppBar(
           title: const Text('SK eSports Finance', style: TextStyle(color: Color(0xFFFF9800))),
           backgroundColor: const Color(0xFF161B22),
@@ -1299,6 +1300,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(child: page),
           ]);
         },
+      ),
       ),
       ),
     );
