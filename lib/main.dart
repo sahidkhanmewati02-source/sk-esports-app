@@ -1199,6 +1199,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!isSuperAdmin || !mounted) return;
     var tab = 0;
     var loading = false;
+    var hasLoaded = false;
     String? loadError;
     StateSetter? refreshFinance;
     final accounts = <Map>[];
@@ -1208,9 +1209,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (loading) return;
       loading = true;
       loadError = null;
-      accounts.clear();
-      deposits.clear();
-      withdrawals.clear();
       refreshFinance?.call(() {});
       try {
         // Finance uses its own bounded, read-only requests. Do not call _sync()
@@ -1228,6 +1226,10 @@ class _HomeScreenState extends State<HomeScreen> {
             throw Exception('Finance data read failed (HTTP ${responses[i].statusCode}, request ${i + 1})');
           }
         }
+        // Replace the displayed snapshot only after every request succeeds.
+        accounts.clear();
+        deposits.clear();
+        withdrawals.clear();
         final liveMatches = <Map<String,dynamic>>[];
         if (responses[0].body.trim() != 'null') {
           final rawMatches = jsonDecode(responses[0].body);
@@ -1300,6 +1302,7 @@ class _HomeScreenState extends State<HomeScreen> {
         loadError = e.toString().replaceAll('Exception: ', '');
       } finally {
         loading = false;
+        hasLoaded = true;
         refreshFinance?.call(() {});
       }
     }
@@ -1314,16 +1317,14 @@ class _HomeScreenState extends State<HomeScreen> {
               IconButton(
                 tooltip: 'Refresh Finance',
                 onPressed: loading ? null : reloadFinance,
-                icon: loading
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.refresh),
+                icon: const Icon(Icons.refresh),
               ),
             ],
           ),
           body: StatefulBuilder(
             builder: (ctx, setD) {
               refreshFinance = setD;
-              if (loading) return const Center(child: CircularProgressIndicator());
+              if (loading && !hasLoaded) return const Center(child: CircularProgressIndicator());
               if (loadError != null && accounts.isEmpty) {
                 return Center(child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -1451,7 +1452,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showAdminSelectionLeaderboard(m); }, icon: const Icon(Icons.poll, size: 16), label: const Text('Admin Picks')),
 
-                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showMatchHisaab(m); }, icon: const Icon(Icons.receipt_long, size: 16), label: const Text('Hisaab')),
+                      OutlinedButton.icon(onPressed: () { _showMatchHisaab(m); }, icon: const Icon(Icons.receipt_long, size: 16), label: const Text('Hisaab')),
                     ],
                   ),
                 ),
