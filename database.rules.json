@@ -52,6 +52,10 @@
           ".read": "auth != null",
           ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === $uid)",
           ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{4,12}$/)"
+        },
+        "referredBy": {
+          ".write": "auth != null && auth.uid === $uid && !data.exists() && newData.isString() && newData.val() !== auth.uid && root.child('users').child(newData.val()).exists()",
+          ".validate": "newData.isString() && newData.val().length > 0"
         }
       }
     },
