@@ -390,7 +390,11 @@ class _AuthScreenState extends State<AuthScreen> {
               throw Exception('SKSAHID verify nahi hua: admin referral field read failed (HTTP ${adminCodeRes.statusCode}).');
             }
             final adminCode = adminCodeRes.body.trim().replaceAll('"', '').toUpperCase();
-            if (adminCode == 'SKSAHID') referredBy = adminUid;
+            // SKSAHID is the established Super Admin referral alias. Accept it
+            // if the old profile field was accidentally replaced by the admin UID.
+            if (adminCode == 'SKSAHID' || adminCode.isEmpty || adminCode == adminUid.toUpperCase()) {
+              referredBy = adminUid;
+            }
           }
         }
         if (referredBy == null) {
@@ -806,6 +810,46 @@ class _HomeScreenState extends State<HomeScreen> {
         _wallet = _num(d['wallet']);
         _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
         _referralCode = (d['referralCode'] ?? '').toString();
+        // Restore the known Super Admin custom code if a previous build replaced
+        // it with the UID/blank value. Never take a code already owned by someone else.
+        if (isSuperAdmin && (_referralCode.isEmpty || _referralCode == widget.uid)) {
+          final adminLookup = await http.get(
+            Uri.parse('$kDbUrl/referralLookup/SKSAHID.json?auth=${widget.token}'),
+          );
+          if (adminLookup.statusCode != 200) {
+            throw Exception('SKSAHID recovery check failed (HTTP ${adminLookup.statusCode}).');
+          }
+          if (adminLookup.body.trim() == 'null') {
+            final restore = await http.patch(
+              Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
+              body: jsonEncode({
+                'users/${widget.uid}/referralCode': 'SKSAHID',
+                'referralLookup/SKSAHID': {
+                  'uid': widget.uid,
+                  'createdAt': DateTime.now().millisecondsSinceEpoch,
+                },
+              }),
+            );
+            if (restore.statusCode < 200 || restore.statusCode >= 300) {
+              throw Exception('SKSAHID profile/lookup restore failed (HTTP ${restore.statusCode}).');
+            }
+            _referralCode = 'SKSAHID';
+          } else {
+            final mapping = jsonDecode(adminLookup.body);
+            if (mapping is Map && mapping['uid']?.toString() == widget.uid) {
+              final restore = await http.put(
+                Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'),
+                body: jsonEncode('SKSAHID'),
+              );
+              if (restore.statusCode < 200 || restore.statusCode >= 300) {
+                throw Exception('SKSAHID profile restore failed (HTTP ${restore.statusCode}).');
+              }
+              _referralCode = 'SKSAHID';
+            } else {
+              throw Exception('SKSAHID kisi doosre UID ka lookup code hai. Koi data overwrite nahi kiya.');
+            }
+          }
+        }
         _referralCount = _num(d['referralCount']);
         _referralEarnings = _num(d['referralEarnings']);
         _referredBy = (d['referredBy'] ?? '').toString();
