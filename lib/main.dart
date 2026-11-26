@@ -738,6 +738,54 @@ class _HomeScreenState extends State<HomeScreen> {
     return data;
   }
 
+  Future<void> _recoverMissingProfileInHome() async {
+    final profileUrl = Uri.parse('$kDbUrl/users/\${widget.uid}.json?auth=\${widget.token}');
+    final before = await http.get(profileUrl).timeout(const Duration(seconds: 20));
+    if (before.statusCode != 200) {
+      throw Exception('Profile check failed HTTP \${before.statusCode}: \${before.body}');
+    }
+    if (before.body.trim() != 'null') return;
+
+    final recoveredName = widget.email.split('@').first.trim();
+    final code = await _createUniqueReferralCode(
+      name: recoveredName,
+      uid: widget.uid,
+      token: widget.token,
+    );
+    final profile = <String, dynamic>{
+      'email': widget.email,
+      'ign': recoveredName.isEmpty ? 'SK_Player' : recoveredName,
+      'bgmiId': 'Not Set',
+      'wallet': 0,
+      'referralCode': code,
+      'referralCount': 0,
+      'referralEarnings': 0,
+    };
+    final save = await http.put(profileUrl, body: jsonEncode(profile))
+        .timeout(const Duration(seconds: 20));
+    if (save.statusCode < 200 || save.statusCode >= 300) {
+      throw Exception('Missing profile create reject HTTP \${save.statusCode}: \${save.body}. Firebase users/\${widget.uid} write rule publish/check karein. Existing data overwrite nahi hua.');
+    }
+    final verify = await http.get(profileUrl).timeout(const Duration(seconds: 20));
+    if (verify.statusCode != 200 || verify.body.trim() == 'null') {
+      throw Exception('Profile recovery verify failed HTTP \${verify.statusCode}: \${verify.body}');
+    }
+
+    // The profile is primary. Secondary indexes are best-effort and never overwrite existing entries.
+    final oldIndexUrl = Uri.parse('$kDbUrl/referralCodes/\${widget.uid}.json?auth=\${widget.token}');
+    final oldIndex = await http.get(oldIndexUrl).timeout(const Duration(seconds: 20));
+    if (oldIndex.statusCode == 200 && oldIndex.body.trim() == 'null') {
+      await http.put(oldIndexUrl,
+        body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
+    }
+    final lookupUrl = Uri.parse('$kDbUrl/referralLookup/$code.json?auth=\${widget.token}');
+    final oldLookup = await http.get(lookupUrl).timeout(const Duration(seconds: 20));
+    if (oldLookup.statusCode == 200 && oldLookup.body.trim() == 'null') {
+      await http.put(lookupUrl,
+        body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
+    }
+  }
+
   Future _sync() async {
     setState(() => _loading = true);
     try {
@@ -769,7 +817,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final uRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
       if (uRes.statusCode != 200) throw Exception('Profile read failed (${uRes.statusCode}); UID/session ya Rules mismatch ho sakta hai. Data overwrite nahi kiya.');
-      if (uRes.body == 'null') throw Exception('Is UID ka profile nahi mila. Koi naya profile create/overwrite nahi kiya.');
+      if (uRes.body.trim() == 'null') {
+        await _recoverMissingProfileInHome();
+        final recovered = await http.get(Uri.parse('$kDbUrl/users/\${widget.uid}.json?auth=\${widget.token}'));
+        if (recovered.statusCode != 200 || recovered.body.trim() == 'null') {
+          throw Exception('Is UID ka profile abhi bhi nahi mila. Recovery result: HTTP \${recovered.statusCode} \${recovered.body}');
+        }
+        uRes.body = recovered.body;
+      }
       {
         final d = jsonDecode(uRes.body);
         _ign = d['ign'] ?? 'SK_Player';
@@ -2962,7 +3017,7 @@ class _HomeScreenState extends State<HomeScreen> {
           body: jsonEncode({'uid': targetUid, 'createdAt': DateTime.now().millisecondsSinceEpoch}),
         ).timeout(const Duration(seconds: 20));
         if (mappingSave.statusCode < 200 || mappingSave.statusCode >= 300) {
-          throw Exception('Referral lookup save reject hua (HTTP ${mappingSave.statusCode}).');
+          throw Exception('Referral lookup save reject hua (HTTP ${mappingSave.statusCode}): ${mappingSave.body}');
         }
       }
 
@@ -2977,7 +3032,7 @@ class _HomeScreenState extends State<HomeScreen> {
             await http.delete(lookupUrl);
           }
         }
-        throw Exception('Profile referralCode save reject hua (HTTP ${profileSave.statusCode}).');
+        throw Exception('Profile referralCode save reject hua (HTTP ${profileSave.statusCode}): ${profileSave.body}');
       }
 
       if (mounted) {
