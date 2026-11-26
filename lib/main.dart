@@ -2178,7 +2178,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text((a['name'] ?? 'Admin').toString()),
                     subtitle: Text(a['isSuperAdmin'] == true ? 'Super Admin' : 'Co-Admin'),
                     onChanged: (v) => setDialogState(() {
-                      if (v == true) { selected.add(uid); } else { selected.remove(uid); }
+                      if (v == true) {
+                        selected.add(uid);
+                        enabled = true;
+                      } else {
+                        selected.remove(uid);
+                      }
                     }),
                   );
                 }).toList(),
@@ -2191,7 +2196,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () async {
                 final chosen = available.where((a) => selected.contains((a['uid'] ?? '').toString())).map((a) => {'uid': a['uid'], 'name': a['name'], 'role': a['role'], 'isSuperAdmin': a['isSuperAdmin'] == true}).toList();
                 if (enabled && chosen.isEmpty) return _msg('Voting ON karne ke liye kam se kam ek admin select karein.');
-                final payload = {'adminSelectionEnabled': enabled, 'votingAdmins': enabled ? chosen : <Map<String,dynamic>>[]};
+                // Keep the selected admin list when voting is OFF, so it can be
+                // re-enabled without selecting every admin again.
+                final payload = {'adminSelectionEnabled': enabled, 'votingAdmins': chosen};
                 final res = await http.patch(
                   Uri.parse('$kDbUrl/matches/${match['id']}.json?auth=${widget.token}'),
                   body: jsonEncode(payload),
@@ -2232,7 +2239,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ? List<Map<String,dynamic>>.from((m['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)).where((x) => (x['uid'] ?? '').toString().isNotEmpty))
         : <Map<String,dynamic>>[];
     // Any configured admin list makes voting compulsory, even on older match records.
-    final adminSelectionEnabled = m['adminSelectionEnabled'] == true || adminOptions.isNotEmpty;
+    // Explicit OFF must be respected even when a saved admin list is retained.
+    // Older matches without the flag but with a saved list remain voting-enabled.
+    final adminSelectionEnabled = m.containsKey('adminSelectionEnabled')
+        ? m['adminSelectionEnabled'] == true
+        : adminOptions.isNotEmpty;
     if (adminSelectionEnabled && adminOptions.isEmpty) {
       _msg('Is match ke Voting Admins Super Admin ne abhi set nahi kiye. Admin se configure karwayein.');
       return;
