@@ -1083,28 +1083,148 @@ class _HomeScreenState extends State<HomeScreen> {
     try{final fresh=_matches.firstWhere((x)=>x['id'].toString()==id,orElse:()=>m),h=await _refreshMatchHisaabFromRoster(fresh),pays=h['adminPayments'] is Map?h['adminPayments'] as Map:<dynamic,dynamic>{};if(pays[uid] is Map&&pays[uid]['status']=='PAID')return _msg('Already Paid.');final row=_adminLeaderboardRows(fresh).firstWhere((x)=>x['uid'].toString()==uid,orElse:()=> <String,dynamic>{}),count=_num(row['count']),total=_matchIndividualPlayerCount(fresh),net=_num(h['collection'])-_num(h['prizeSent'])-_matchExpenses(h);if(count<=0||total<=0||net<=0)return _msg('Positive Net Profit required.');final amount=(net*.25*count/total).round(),ur=await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'));if(ur.statusCode!=200||ur.body=='null')throw Exception('Admin wallet read failed.');final user=jsonDecode(ur.body) as Map,now=DateTime.now(),txn=DateTime.now().microsecondsSinceEpoch.toString();final payment={'uid':uid,'name':admin['name']??row['name']??'Admin','playerCount':count,'totalPlayers':total,'netProfitPercent':25*count/total,'amount':amount,'status':'PAID','paidAt':now.millisecondsSinceEpoch,'paidBy':widget.uid};final patch=<String,dynamic>{'users/$uid/wallet':_num(user['wallet'])+amount,'users/$uid/txns/$txn':{'title':'Match Admin Share','sub':(fresh['title']??'Match').toString(),'amt':amount,'status':'CREDITED','createdAt':now.millisecondsSinceEpoch},'match_hisaab/$id/adminPayments/$uid':payment};final r=await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'),body:jsonEncode(patch));if(r.statusCode<200||r.statusCode>=300)throw Exception('Payout failed '+r.body);_msg('₹'+amount.toString()+' credited.');await _sync();}catch(e){_msg(e.toString().replaceAll('Exception: ',''));}
   }
 
+
   Future<void> _showFinanceDashboard() async {
-    if(!isSuperAdmin)return;
-    var tab=0;final accounts=<Map>[],deposits=<Map>[],withdrawals=<Map>[];
-    try{for(final m in _matches){final h=await _refreshMatchHisaabFromRoster(m);accounts.add({'id':m['id'].toString(),'title':m['title']??'Match','match':m,...h});}final d=await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));if(d.statusCode==200&&d.body!='null')(jsonDecode(d.body) as Map).forEach((k,v){if(v is Map)deposits.add({'id':k,...v});});final w=await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));if(w.statusCode==200&&w.body!='null')(jsonDecode(w.body) as Map).forEach((k,v){if(v is Map)withdrawals.add({'id':k,...v});});}catch(e){_msg('Finance load: '+e.toString());}
-    if(!mounted)return;
-    await showDialog<void>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD){
-      final c = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
-      final p = accounts.fold<int>(0, (n, a) => n + _num(a['prizeSent']));
-      final x = accounts.fold<int>(0, (n, a) => n + _matchExpenses(a));
-      final net = c - p - x;
-      final players = <Map<String, dynamic>>[];
-      for(final a in accounts){final m=a['match'] as Map,ps=m['players'] is Map?m['players'] as Map:<dynamic,dynamic>{};for(final e in ps.entries){final v=e.value is Map?Map<String,dynamic>.from(e.value as Map):<String,dynamic>{};players.add({'match':a['title'],...v});}}
-      Widget metric(String t,String v)=>Card(child:ListTile(title:Text(t),trailing:Text(v,style:const TextStyle(color:Color(0xFF00E676),fontWeight:FontWeight.bold))));
-      Widget page;
-      if(tab==0)page=ListView(children:[metric('Total Collection','₹'+c.toString()),metric('Prizes','₹'+p.toString()),metric('Expenses','₹'+x.toString()),metric('Net Profit','₹'+net.toString()),metric('Admins Pool 25%','₹'+(net>0?net*.25:0).toStringAsFixed(2)),metric('SK eSports 75%','₹'+(net>0?net*.75:0).toStringAsFixed(2))]);
-      else if(tab==1)page=ListView(children:accounts.map((a){final m=a['match'] as Map,profit=_num(a['collection'])-_num(a['prizeSent'])-_matchExpenses(a),total=_matchIndividualPlayerCount(m),paid=a['adminPayments'] is Map?a['adminPayments'] as Map:<dynamic,dynamic>{};return Card(child:Column(children:[ListTile(title:Text(a['title'].toString()),subtitle:Text('Net ₹'+profit.toString())),..._adminLeaderboardRows(m).map((r){final n=_num(r['count']),amt=profit>0?(profit*.25*n/(total==0?1:total)).round():0,status=paid[r['uid']] is Map?paid[r['uid']]['status']:'PENDING';return ListTile(title:Text(r['name'].toString()+' • '+n.toString()+' players'),subtitle:Text((total==0?0:25*n/total).toStringAsFixed(2)+'% • ₹'+amt.toString()+' • '+status.toString()),trailing:status=='PAID'?const Text('PAID'):TextButton(onPressed:()=>_payAdminShare(m,Map<String,dynamic>.from(r)),child:const Text('Add to Wallet')));}),Wrap(children:[TextButton(onPressed:(){Navigator.pop(ctx);_showAdminSelectionLeaderboard(m);},child:const Text('Leaderboard')),TextButton(onPressed:(){Navigator.pop(ctx);_addMatchExpense(m);},child:const Text('Add Expense')),TextButton(onPressed:(){Navigator.pop(ctx);_showMatchHisaab(m);},child:const Text('Hisaab'))]) ]));}).toList());
-      else if(tab==2)page=ListView(children:players.map((v){final mem=v['members'] is List?v['members'] as List:[v],ids=mem.whereType<Map>().map((z)=>(z['bgmiId']??'').toString()).toList();return ListTile(title:Text((v['ign']??'Player').toString()+' • '+v['match'].toString()),subtitle:Text('Admin '+(v['selectedAdminName']??'-').toString()+' • Kills '+(v['kills']??0).toString()+' • Entry ₹'+(v['feePaid']??0).toString()+' • Reward ₹'+(v['reward']??0).toString()+' • '+(ids.toSet().length!=ids.length?'Duplicate ID':'ID OK')+' • '+(v['refundStatus']??'No refund').toString()));}).toList());
-      else if(tab==3)page=ListView(children:accounts.expand((a){final ex=a['expenses'] is Map?(a['expenses'] as Map).values.whereType<Map>().toList():<Map>[];return <Widget>[ListTile(title:Text(a['title'].toString()),trailing:Text('₹'+_matchExpenses(a).toString())),...ex.map((z)=>ListTile(title:Text((z['note']??'Expense').toString()+' ₹'+(z['amount']??0).toString()),subtitle:Text('Proof '+(z['proof']??'-').toString()))),TextButton(onPressed:(){Navigator.pop(ctx);_addMatchExpense(a['match'] as Map);},child:const Text('Add Expense'))];}).toList());
-      else page=ListView(children:[...accounts.expand((a){final ps=a['adminPayments'] is Map?a['adminPayments'] as Map:<dynamic,dynamic>{};return ps.values.whereType<Map>().map((z)=>ListTile(title:Text((z['name']??'Admin').toString()+' • '+a['title'].toString()),subtitle:Text((z['status']??'PENDING').toString()+' • '+(z['utr']??z['proof']??'Wallet credit').toString()),trailing:Text('₹'+(z['amount']??0).toString()));}),const ListTile(title:Text('Deposits / Withdrawals • UTR / Proof')),...deposits.map((z)=>ListTile(title:Text('Deposit '+(z['status']??'PENDING').toString()+' ₹'+(z['amt']??z['amount']??0).toString()),subtitle:Text('UTR '+(z['utr']??'-').toString()+' • '+(z['proof']??z['screenshot']??'-').toString()))),...withdrawals.map((z)=>ListTile(title:Text('Withdrawal '+(z['status']??'PENDING').toString()+' ₹'+(z['amt']??0).toString()),subtitle:Text('UTR '+(z['utr']??'-').toString())) )]);
-      return AlertDialog(title:const Text('SK eSports Finance',style:TextStyle(color:Color(0xFFFF9800))),content:SizedBox(width:double.maxFinite,height:530,child:Column(children:[SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[for(var i=0;i<5;i++)Padding(padding:const EdgeInsets.only(right:4),child:ChoiceChip(label:Text(['Overview','Match Manager','All Players','Expenses','Payments'][i]),selected:tab==i,onSelected:(_)=>setD(()=>tab=i)))])),Expanded(child:page)])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Close'))]);
-    }));
+    if (!isSuperAdmin) return;
+    var tab = 0;
+    final accounts = <Map>[];
+    final deposits = <Map>[];
+    final withdrawals = <Map>[];
+    try {
+      for (final m in _matches) {
+        final h = await _refreshMatchHisaabFromRoster(m);
+        accounts.add({'id': m['id'].toString(), 'title': m['title'] ?? 'Match', 'match': m, ...h});
+      }
+      final d = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
+      if (d.statusCode == 200 && d.body != 'null') {
+        (jsonDecode(d.body) as Map).forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
+      }
+      final w = await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));
+      if (w.statusCode == 200 && w.body != 'null') {
+        (jsonDecode(w.body) as Map).forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
+      }
+    } catch (e) {
+      _msg('Finance load warning: ' + e.toString());
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final collection = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
+          final prizes = accounts.fold<int>(0, (n, a) => n + _num(a['prizeSent']));
+          final expenses = accounts.fold<int>(0, (n, a) => n + _matchExpenses(a));
+          final net = collection - prizes - expenses;
+          final players = <Map<String, dynamic>>[];
+          for (final a in accounts) {
+            final m = a['match'] as Map;
+            final roster = m['players'] is Map ? m['players'] as Map : <dynamic, dynamic>{};
+            for (final e in roster.entries) {
+              final p = e.value is Map ? Map<String, dynamic>.from(e.value as Map) : <String, dynamic>{};
+              players.add({'match': a['title'], ...p});
+            }
+          }
+          Widget metric(String label, String value) {
+            return Card(child: ListTile(title: Text(label), trailing: Text(value, style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))));
+          }
+          Widget page;
+          if (tab == 0) {
+            page = ListView(children: [
+              metric('Total Collection', '₹' + collection.toString()),
+              metric('Player Prizes', '₹' + prizes.toString()),
+              metric('Expenses', '₹' + expenses.toString()),
+              metric('Net Profit', '₹' + net.toString()),
+              metric('Admins Pool • 25%', '₹' + (net > 0 ? net * .25 : 0).toStringAsFixed(2)),
+              metric('SK eSports • 75%', '₹' + (net > 0 ? net * .75 : 0).toStringAsFixed(2)),
+            ]);
+          } else if (tab == 1) {
+            final widgets = <Widget>[];
+            for (final a in accounts) {
+              final m = a['match'] as Map;
+              final profit = _num(a['collection']) - _num(a['prizeSent']) - _matchExpenses(a);
+              final total = _matchIndividualPlayerCount(m);
+              final paid = a['adminPayments'] is Map ? a['adminPayments'] as Map : <dynamic, dynamic>{};
+              final rows = _adminLeaderboardRows(m);
+              final adminWidgets = <Widget>[];
+              for (final r in rows) {
+                final count = _num(r['count']);
+                final amount = profit > 0 ? (profit * .25 * count / (total == 0 ? 1 : total)).round() : 0;
+                final status = paid[r['uid']] is Map ? paid[r['uid']]['status'] : 'PENDING';
+                adminWidgets.add(ListTile(
+                  dense: true,
+                  title: Text(r['name'].toString() + ' • ' + count.toString() + ' players'),
+                  subtitle: Text((total == 0 ? 0 : 25 * count / total).toStringAsFixed(2) + '% of Net Profit • ₹' + amount.toString() + ' • ' + status.toString()),
+                  trailing: status == 'PAID' ? const Text('PAID') : TextButton(onPressed: () => _payAdminShare(m, Map<String, dynamic>.from(r)), child: const Text('Add to Wallet')),
+                ));
+              }
+              widgets.add(Card(child: Column(children: [
+                ListTile(title: Text(a['title'].toString()), subtitle: Text('Collection ₹' + a['collection'].toString() + ' • Net ₹' + profit.toString())),
+                ...adminWidgets,
+                Wrap(children: [
+                  TextButton(onPressed: () { Navigator.pop(ctx); _showAdminSelectionLeaderboard(m); }, child: const Text('Admin Picks')),
+                  TextButton(onPressed: () { Navigator.pop(ctx); _addMatchExpense(m); }, child: const Text('Add Expense')),
+                  TextButton(onPressed: () { Navigator.pop(ctx); _showMatchHisaab(m); }, child: const Text('Hisaab')),
+                ]),
+              ])));
+            }
+            page = ListView(children: widgets);
+          } else if (tab == 2) {
+            final widgets = <Widget>[];
+            for (final p in players) {
+              final members = p['members'] is List ? p['members'] as List : [p];
+              final ids = members.whereType<Map>().map((x) => (x['bgmiId'] ?? '').toString()).where((x) => x.isNotEmpty).toList();
+              widgets.add(ListTile(
+                title: Text((p['ign'] ?? 'Player').toString() + ' • ' + p['match'].toString()),
+                subtitle: Text('Admin: ' + (p['selectedAdminName'] ?? '-').toString() + ' • Kills: ' + (p['kills'] ?? 0).toString() + ' • Entry: ₹' + (p['feePaid'] ?? 0).toString() + ' • Reward: ₹' + (p['reward'] ?? 0).toString() + '\n' + (ids.toSet().length != ids.length ? 'Duplicate ID' : 'ID OK') + ' • ' + (p['refundStatus'] ?? 'No refund').toString()),
+              ));
+            }
+            page = ListView(children: widgets);
+          } else if (tab == 3) {
+            final widgets = <Widget>[];
+            for (final a in accounts) {
+              widgets.add(ListTile(title: Text(a['title'].toString()), trailing: Text('₹' + _matchExpenses(a).toString())));
+              if (a['expenses'] is Map) {
+                for (final x in (a['expenses'] as Map).values.whereType<Map>()) {
+                  widgets.add(ListTile(title: Text((x['note'] ?? 'Expense').toString() + ' • ₹' + (x['amount'] ?? 0).toString()), subtitle: Text('UTR / Proof: ' + (x['proof'] ?? '-').toString())));
+                }
+              }
+              widgets.add(TextButton(onPressed: () { Navigator.pop(ctx); _addMatchExpense(a['match'] as Map); }, child: const Text('Add Expense')));
+            }
+            page = ListView(children: widgets);
+          } else {
+            final widgets = <Widget>[const ListTile(title: Text('Admin Share Payments'))];
+            for (final a in accounts) {
+              if (a['adminPayments'] is Map) {
+                for (final payment in (a['adminPayments'] as Map).values.whereType<Map>()) {
+                  widgets.add(ListTile(title: Text((payment['name'] ?? 'Admin').toString() + ' • ' + a['title'].toString()), subtitle: Text((payment['status'] ?? 'PENDING').toString() + ' • UTR / Proof: ' + (payment['utr'] ?? payment['proof'] ?? 'Wallet credit').toString()), trailing: Text('₹' + (payment['amount'] ?? 0).toString())));
+                }
+              }
+            }
+            widgets.add(const Divider());
+            widgets.add(const ListTile(title: Text('Deposits / Withdrawals • UTR / Proof')));
+            for (final p in deposits) {
+              widgets.add(ListTile(dense: true, title: Text('Deposit • ' + (p['status'] ?? 'PENDING').toString() + ' • ₹' + (p['amt'] ?? p['amount'] ?? 0).toString()), subtitle: Text('UTR: ' + (p['utr'] ?? '-').toString() + ' • Proof: ' + (p['proof'] ?? p['screenshot'] ?? '-').toString())));
+            }
+            for (final p in withdrawals) {
+              widgets.add(ListTile(dense: true, title: Text('Withdrawal • ' + (p['status'] ?? 'PENDING').toString() + ' • ₹' + (p['amt'] ?? 0).toString()), subtitle: Text('UTR: ' + (p['utr'] ?? '-').toString())));
+            }
+            page = ListView(children: widgets);
+          }
+          return AlertDialog(
+            title: const Text('SK eSports Finance', style: TextStyle(color: Color(0xFFFF9800))),
+            content: SizedBox(width: double.maxFinite, height: 530, child: Column(children: [
+              SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+                for (var i = 0; i < 5; i++) Padding(padding: const EdgeInsets.only(right: 4), child: ChoiceChip(label: Text(['Overview', 'Match Manager', 'All Players', 'Expenses', 'Payments'][i]), selected: tab == i, onSelected: (_) => setD(() => tab = i))),
+              ])),
+              Expanded(child: page),
+            ])),
+            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+          );
+        },
+      ),
+    );
   }
+
 
   Future _saveTxn(String uid, int bal, String title, String sub, int amt, String status) async {
     final now = DateTime.now();
