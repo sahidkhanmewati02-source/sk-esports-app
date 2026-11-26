@@ -1204,6 +1204,62 @@ class _HomeScreenState extends State<HomeScreen> {
     final accounts = <Map>[];
     final deposits = <Map>[];
     final withdrawals = <Map>[];
+    Future<void> reloadFinance() async {
+      if (loading) return;
+      loading = true;
+      loadError = null;
+      accounts.clear();
+      deposits.clear();
+      withdrawals.clear();
+      refreshFinance?.call(() {});
+      try {
+        // Refresh the app's live matches, wallet transactions and match hisaab,
+        // then rebuild the Finance screen from the newly synced data.
+        await _sync();
+        for (final m in _matches) {
+          final id = m['id'].toString();
+          final cached = _matchAccounts.firstWhere(
+            (x) => (x['id'] ?? '').toString() == id,
+            orElse: () => <String,dynamic>{},
+          );
+          final h = Map<String,dynamic>.from(cached);
+          accounts.add({
+            'id': id,
+            'title': m['title'] ?? h['title'] ?? 'Match',
+            'match': m,
+            ...h,
+            'collection': _rosterCollection(m, h),
+          });
+        }
+        for (final cached in _matchAccounts) {
+          final id = (cached['id'] ?? '').toString();
+          if (id.isEmpty || accounts.any((a) => a['id'].toString() == id)) continue;
+          accounts.add({
+            ...Map<String,dynamic>.from(cached),
+            'match': <String,dynamic>{'id':id,'title':cached['title'] ?? 'Match','players':<String,dynamic>{}},
+          });
+        }
+        final responses = await Future.wait<http.Response>([
+          http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
+          http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
+        ]);
+        final d = responses[0], w = responses[1];
+        if (d.statusCode != 200) throw Exception('Deposits read failed HTTP ${d.statusCode}');
+        if (w.statusCode != 200) throw Exception('Withdrawals read failed HTTP ${w.statusCode}');
+        if (d.body != 'null') {
+          final data = jsonDecode(d.body);
+          if (data is Map) data.forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
+        }
+        if (w.body != 'null') {
+          final data = jsonDecode(w.body);
+          if (data is Map) data.forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
+        }
+      } catch (e) {
+        loadError = e.toString().replaceAll('Exception: ', '');
+      }
+      loading = false;
+      refreshFinance?.call(() {});
+    }
     final routeFuture = Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
@@ -1211,6 +1267,15 @@ class _HomeScreenState extends State<HomeScreen> {
           appBar: AppBar(
             title: const Text('SK eSports Finance', style: TextStyle(color: Color(0xFFFF9800))),
             backgroundColor: const Color(0xFF161B22),
+            actions: [
+              IconButton(
+                tooltip: 'Refresh Finance',
+                onPressed: loading ? null : reloadFinance,
+                icon: loading
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.refresh),
+              ),
+            ],
           ),
           body: StatefulBuilder(
             builder: (ctx, setD) {
@@ -1391,56 +1456,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       ),
     );
-    Future<void>(() async {
-      try {
-        // Reuse the match-hisaab data already loaded by _sync; do not issue
-        // a second unbounded read/write for every match when opening Finance.
-        for (final m in _matches) {
-          final id = m['id'].toString();
-          final cached = _matchAccounts.firstWhere(
-            (x) => (x['id'] ?? '').toString() == id,
-            orElse: () => <String,dynamic>{},
-          );
-          final h = Map<String,dynamic>.from(cached);
-          final collectionValue = _rosterCollection(m, h);
-          accounts.add({
-            'id': id,
-            'title': m['title'] ?? h['title'] ?? 'Match',
-            'match': m,
-            ...h,
-            'collection': collectionValue,
-          });
-        }
-        // Retain settled/archived hisaab rows in the finance view.
-        for (final cached in _matchAccounts) {
-          final id = (cached['id'] ?? '').toString();
-          if (id.isEmpty || accounts.any((a) => a['id'].toString() == id)) continue;
-          accounts.add({
-            ...Map<String,dynamic>.from(cached),
-            'match': <String,dynamic>{'id':id,'title':cached['title'] ?? 'Match','players':<String,dynamic>{}},
-          });
-        }
-        final responses = await Future.wait<http.Response>([
-          http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
-          http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
-        ]);
-        final d = responses[0], w = responses[1];
-        if (d.statusCode != 200) throw Exception('Deposits read failed HTTP ${d.statusCode}');
-        if (w.statusCode != 200) throw Exception('Withdrawals read failed HTTP ${w.statusCode}');
-        if (d.body != 'null') {
-          final data = jsonDecode(d.body);
-          if (data is Map) data.forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
-        }
-        if (w.body != 'null') {
-          final data = jsonDecode(w.body);
-          if (data is Map) data.forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
-        }
-      } catch (e) {
-        loadError = e.toString().replaceAll('Exception: ', '');
-      }
-      loading = false;
-      refreshFinance?.call(() {});
-    });
+    reloadFinance();
     await routeFuture;
   }
 
