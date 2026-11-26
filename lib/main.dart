@@ -1019,6 +1019,14 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String,dynamic>> _adminLeaderboardRows(Map match) {
     final players = match['players'] is Map ? match['players'] as Map : <dynamic,dynamic>{};
     final groups = <String,Map<String,dynamic>>{}, ids = <String,int>{};
+    // Show every admin configured for this match, even before the first player votes.
+    final configured = match['votingAdmins'] is List ? match['votingAdmins'] as List : const [];
+    for (final item in configured) {
+      if (item is! Map) continue;
+      final uid = (item['uid'] ?? '').toString();
+      if (uid.isEmpty) continue;
+      groups[uid] = {'uid':uid,'name':item['name'] ?? 'Admin','count':0,'players':<Map<String,dynamic>>[]};
+    }
     for (final e in players.entries) {
       final p = e.value is Map ? Map<String,dynamic>.from(e.value as Map) : <String,dynamic>{};
       final members = p['members'] is List ? p['members'] as List : [p];
@@ -1113,7 +1121,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 8),
           IconButton(tooltip: 'UPI / QR', onPressed: isSuperAdmin ? _showPaymentSettingsDialog : _deposit, icon: const Icon(Icons.qr_code_2, color: Color(0xFFFF9800))),
         ]),
-        Row(children: [
+        if (!isSuperAdmin) Row(children: [
           Expanded(child: _walletMetric('All-time Credits', '₹$credits', Icons.trending_up, const Color(0xFF00E676))),
           const SizedBox(width: 8),
           Expanded(child: _walletMetric('This Month', '₹$monthCredits', Icons.calendar_month, const Color(0xFFFF9800))),
@@ -1124,7 +1132,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 8),
           Expanded(child: _walletMetric('Transactions', _txns.length.toString(), Icons.receipt_long, Colors.lightBlueAccent)),
         ]),
-        if (monthKeys.isNotEmpty) ...[
+        if (!isSuperAdmin && monthKeys.isNotEmpty) ...[
           const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 14,bottom: 5), child: Text('MONTH-WISE EARNINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
           SizedBox(height: 64, child: ListView(scrollDirection: Axis.horizontal, children: monthKeys.map((k)=>Container(width: 126, margin: const EdgeInsets.only(right: 8), child: Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(mainAxisAlignment: MainAxisAlignment.center,crossAxisAlignment: CrossAxisAlignment.start,children:[Text(monthLabel(k),style: const TextStyle(fontSize: 12,color: Colors.grey)),const SizedBox(height: 4),Text('₹${monthly[k]}',style: const TextStyle(fontWeight: FontWeight.bold,color: Color(0xFF00E676),fontSize: 17))]))))).toList())),
         ],
@@ -1177,6 +1185,34 @@ class _HomeScreenState extends State<HomeScreen> {
                   ]),
                 ));
               }
+              int allTimeCredits = 0, thisMonthCredits = 0;
+              final financeMonthly = <String,int>{};
+              final financeNow = DateTime.now();
+              const financeCreditStatuses = {'CREDITED','APPROVED','SUCCESS','COMPLETED'};
+              const financeDebitStatuses = {'DEBITED','WITHDRAWN','WITHDRAWAL'};
+              for (final t in _txns) {
+                final amount = _num(t['amt']).round();
+                final status = (t['status'] ?? '').toString().toUpperCase();
+                final title = (t['title'] ?? '').toString().toLowerCase();
+                final credit = financeCreditStatuses.contains(status) || title.contains('reward') || title.contains('prize') || title.contains('referral') || title.contains('win') || title.contains('share') || title.contains('credit');
+                final debit = financeDebitStatuses.contains(status) || title.contains('entry fee') || title.contains('withdraw');
+                if (!credit || debit) continue;
+                allTimeCredits += amount;
+                final stamp = _historyTimestamp(t);
+                if (stamp > 0) {
+                  final dt = DateTime.fromMillisecondsSinceEpoch(stamp);
+                  final key = '${dt.year}-${dt.month.toString().padLeft(2,'0')}';
+                  financeMonthly[key] = (financeMonthly[key] ?? 0) + amount;
+                  if (dt.year == financeNow.year && dt.month == financeNow.month) thisMonthCredits += amount;
+                }
+              }
+              final financeMonthKeys = financeMonthly.keys.toList()..sort((a,b)=>b.compareTo(a));
+              String financeMonthLabel(String key) {
+                final parts = key.split('-');
+                final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]));
+                const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                return '${names[dt.month-1]} ${dt.year}';
+              }
               final collection = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
           final prizes = accounts.fold<int>(0, (n, a) => n + _num(a['prizeSent']));
           final expenses = accounts.fold<int>(0, (n, a) => n + _matchExpenses(a));
@@ -1196,6 +1232,10 @@ class _HomeScreenState extends State<HomeScreen> {
           Widget page;
           if (tab == 0) {
             page = ListView(children: [
+              metric('Total Earning • All Time', '₹' + allTimeCredits.toString()),
+              metric('This Month Earning', '₹' + thisMonthCredits.toString()),
+              if (financeMonthKeys.isNotEmpty) const Padding(padding: EdgeInsets.fromLTRB(16,12,16,4), child: Text('MONTH-WISE EARNINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
+              if (financeMonthKeys.isNotEmpty) SizedBox(height: 74, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: financeMonthKeys.map((k) => SizedBox(width: 130, child: Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(financeMonthLabel(k), style: const TextStyle(fontSize: 12, color: Colors.grey)), const SizedBox(height: 4), Text('₹${financeMonthly[k]}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 17))]))))).toList())),
               metric('Total Collection', '₹' + collection.toString()),
               metric('Player Prizes', '₹' + prizes.toString()),
               metric('Expenses', '₹' + expenses.toString()),
@@ -1314,36 +1354,50 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     Future<void>(() async {
       try {
-        final matchJobs = _matches.map((m) async {
-          final h = await _refreshMatchHisaabFromRoster(m);
-          return <String, dynamic>{
-            'id': m['id'].toString(),
-            'title': m['title'] ?? 'Match',
+        // Reuse the match-hisaab data already loaded by _sync; do not issue
+        // a second unbounded read/write for every match when opening Finance.
+        for (final m in _matches) {
+          final id = m['id'].toString();
+          final cached = _matchAccounts.firstWhere(
+            (x) => (x['id'] ?? '').toString() == id,
+            orElse: () => <String,dynamic>{},
+          );
+          final h = Map<String,dynamic>.from(cached);
+          final collectionValue = _rosterCollection(m, h);
+          accounts.add({
+            'id': id,
+            'title': m['title'] ?? h['title'] ?? 'Match',
             'match': m,
             ...h,
-          };
-        }).toList();
-        final results = await Future.wait<dynamic>([
-          ...matchJobs,
-          http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')),
-          http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')),
-        ]);
-        final matchCount = matchJobs.length;
-        for (var i = 0; i < matchCount; i++) {
-          accounts.add(results[i] as Map);
+            'collection': collectionValue,
+          });
         }
-        final d = results[matchCount] as http.Response;
-        if (d.statusCode == 200 && d.body != 'null') {
+        // Retain settled/archived hisaab rows in the finance view.
+        for (final cached in _matchAccounts) {
+          final id = (cached['id'] ?? '').toString();
+          if (id.isEmpty || accounts.any((a) => a['id'].toString() == id)) continue;
+          accounts.add({
+            ...Map<String,dynamic>.from(cached),
+            'match': <String,dynamic>{'id':id,'title':cached['title'] ?? 'Match','players':<String,dynamic>{}},
+          });
+        }
+        final responses = await Future.wait<http.Response>([
+          http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
+          http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
+        ]);
+        final d = responses[0], w = responses[1];
+        if (d.statusCode != 200) throw Exception('Deposits read failed HTTP ${d.statusCode}');
+        if (w.statusCode != 200) throw Exception('Withdrawals read failed HTTP ${w.statusCode}');
+        if (d.body != 'null') {
           final data = jsonDecode(d.body);
           if (data is Map) data.forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
         }
-        final w = results[matchCount + 1] as http.Response;
-        if (w.statusCode == 200 && w.body != 'null') {
+        if (w.body != 'null') {
           final data = jsonDecode(w.body);
           if (data is Map) data.forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
         }
       } catch (e) {
-        loadError = e.toString();
+        loadError = e.toString().replaceAll('Exception: ', '');
       }
       loading = false;
       refreshFinance?.call(() {});
