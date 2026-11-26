@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -13,7 +12,6 @@ import 'package:webview_flutter/webview_flutter.dart';
 const String kApiKey = 'AIzaSyDdXPfU6_RkgFXyq58nUeEFIQI3JI_nVf0';
 const String kDbUrl = 'https://sk-esports-live-default-rtdb.asia-southeast1.firebasedatabase.app';
 const String kAdmin = 'sahidkhanmewati02@gmail.com';
-const String kGoogleWebClientId = '998164044066-08phgph5ksi9j0c6erfg457vtfj8c1fk.apps.googleusercontent.com';
 
 void main() => runApp(MaterialApp(
       title: 'SK ESPORTS',
@@ -275,120 +273,6 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  Future<void> _googleSignIn() async {
-    if (_loading) return;
-    setState(() => _loading = true);
-    try {
-      final google = GoogleSignIn(
-        serverClientId: kGoogleWebClientId,
-        scopes: const ['email'],
-      );
-      final account = await google.signIn();
-      if (account == null) return;
-      final googleAuth = await account.authentication;
-      final googleIdToken = googleAuth.idToken;
-      if (googleIdToken == null || googleIdToken.isEmpty) {
-        throw Exception('Google ID token nahi mila. SHA-1 aur OAuth setup check karein.');
-      }
-
-      final res = await http.post(
-        Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=$kApiKey'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'postBody': 'id_token=${Uri.encodeComponent(googleIdToken)}&providerId=google.com',
-          'requestUri': 'http://localhost',
-          'returnIdpCredential': true,
-          'returnSecureToken': true,
-        }),
-      );
-      final data = jsonDecode(res.body);
-      if (res.statusCode != 200) {
-        throw Exception(data['error']?['message'] ?? 'Google login failed');
-      }
-      final String uid = data['localId'];
-      final String token = data['idToken'];
-      final String email = (data['email'] ?? account.email).toString();
-      final profileRes = await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=$token'));
-      if (profileRes.statusCode != 200) {
-        throw Exception('Firebase profile load nahi hua. Database Rules check karein.');
-      }
-
-      if (profileRes.body == 'null') {
-        final playerName = (account.displayName ?? '').trim().isNotEmpty
-            ? account.displayName!.trim()
-            : email.split('@').first;
-        String? referredBy;
-        if (!_isLogin && _referral.text.trim().isNotEmpty) {
-          final code = _referral.text.trim().toUpperCase();
-          final lookupRes = await http.get(Uri.parse('$kDbUrl/referralLookup/$code.json?auth=$token'));
-          if (lookupRes.statusCode == 200 && lookupRes.body != 'null') {
-            final lookup = jsonDecode(lookupRes.body);
-            if (lookup is Map && lookup['uid']?.toString() != uid) {
-              referredBy = lookup['uid'].toString();
-            }
-          }
-          if (referredBy == null) {
-            final oldRes = await http.get(Uri.parse('$kDbUrl/referralCodes/$code.json?auth=$token'));
-            if (oldRes.statusCode == 200 && oldRes.body != 'null') {
-              final old = jsonDecode(oldRes.body);
-              if (old is Map && old['uid']?.toString() != uid) referredBy = old['uid'].toString();
-            }
-          }
-          if (referredBy == null) _msg('Referral code valid nahi mila. Account bina referral ke banaya ja raha hai.');
-        }
-        final ownCode = await _createUniqueReferralCode(name: playerName, uid: uid, token: token);
-        final saveProfile = await http.put(
-          Uri.parse('$kDbUrl/users/$uid.json?auth=$token'),
-          body: jsonEncode({
-            'email': email,
-            'ign': playerName,
-            'bgmiId': 'Not Set',
-            'wallet': 0,
-            'referralCode': ownCode,
-            'referralCount': 0,
-            'referralEarnings': 0,
-            if (referredBy != null) 'referredBy': referredBy,
-          }),
-        );
-        if (saveProfile.statusCode < 200 || saveProfile.statusCode >= 300) {
-          throw Exception('Google account ban gaya, lekin player profile save nahi hui.');
-        }
-        await http.put(Uri.parse('$kDbUrl/referralCodes/$uid.json?auth=$token'),
-            body: jsonEncode({'uid': uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
-        await http.put(Uri.parse('$kDbUrl/referralLookup/$ownCode.json?auth=$token'),
-            body: jsonEncode({'uid': uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
-        if (referredBy != null) {
-          final referralRes = await http.put(
-            Uri.parse('$kDbUrl/referralCodes/$referredBy/referrals/$uid.json?auth=$token'),
-            body: jsonEncode({
-              'uid': uid,
-              'ign': playerName,
-              'status': 'PENDING',
-              'createdAt': DateTime.now().millisecondsSinceEpoch,
-              'reward': 5,
-            }),
-          );
-          if (referralRes.statusCode < 200 || referralRes.statusCode >= 300) {
-            _msg('Account ban gaya, lekin referral pending record save nahi hua.');
-          }
-        }
-      }
-
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString('rt', data['refreshToken']);
-      await sp.setString('email', email);
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => HomeScreen(uid: uid, token: token, email: email)),
-      );
-    } catch (err) {
-      _msg(err.toString().replaceAll('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
   Future _submit() async {
     final e = _email.text.trim(), p = _pass.text.trim();
     if (!e.contains('@') || !RegExp(r'^.{6,}$').hasMatch(p)) {
@@ -533,21 +417,6 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                 ),
                 const SizedBox(height: 12),
-                const Row(children: [
-                  Expanded(child: Divider()),
-                  Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text('OR')),
-                  Expanded(child: Divider()),
-                ]),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(46),
-                    side: const BorderSide(color: Colors.white38),
-                  ),
-                  onPressed: _loading ? null : _googleSignIn,
-                  icon: const Icon(Icons.g_mobiledata, size: 28),
-                  label: const Text('Continue with Google'),
-                ),
                 TextButton(
                   onPressed: () => setState(() => _isLogin = !_isLogin),
                   child: Text(_isLogin ? 'New Player? Sign Up' : 'Already have account? Login'),
