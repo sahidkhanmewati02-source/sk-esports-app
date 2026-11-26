@@ -2290,7 +2290,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
                     child: Text(
-                      'Total Entry Fee: ₹$baseTotal',
+                      'Entry Fee: ₹$baseTotal',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                   ),
@@ -2379,7 +2379,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     _sync();
                   }
                 },
-                child: Text('Pay ₹$payable', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                child: const Text('CONFIRM JOIN', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
               ),
             ],
           );
