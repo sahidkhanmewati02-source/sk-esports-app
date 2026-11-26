@@ -1167,17 +1167,39 @@ class _HomeScreenState extends State<HomeScreen> {
     final deposits = <Map>[];
     final withdrawals = <Map>[];
     try {
-      for (final m in _matches) {
+      // Load every match account and both transaction lists concurrently.
+      // The old sequential awaits made Finance feel unresponsive as match count grew.
+      final matchJobs = _matches.map((m) async {
         final h = await _refreshMatchHisaabFromRoster(m);
-        accounts.add({'id': m['id'].toString(), 'title': m['title'] ?? 'Match', 'match': m, ...h});
+        return <String, dynamic>{
+          'id': m['id'].toString(),
+          'title': m['title'] ?? 'Match',
+          'match': m,
+          ...h,
+        };
+      }).toList();
+      final results = await Future.wait<dynamic>([
+        ...matchJobs,
+        http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')),
+        http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')),
+      ]);
+      final matchCount = matchJobs.length;
+      for (var i = 0; i < matchCount; i++) {
+        accounts.add(results[i] as Map);
       }
-      final d = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
+      final d = results[matchCount] as http.Response;
       if (d.statusCode == 200 && d.body != 'null') {
-        (jsonDecode(d.body) as Map).forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
+        final data = jsonDecode(d.body);
+        if (data is Map) {
+          data.forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
+        }
       }
-      final w = await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));
+      final w = results[matchCount + 1] as http.Response;
       if (w.statusCode == 200 && w.body != 'null') {
-        (jsonDecode(w.body) as Map).forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
+        final data = jsonDecode(w.body);
+        if (data is Map) {
+          data.forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
+        }
       }
     } catch (e) {
       _msg('Finance load warning: ' + e.toString());
