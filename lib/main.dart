@@ -875,7 +875,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final now = DateTime.now();
       final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
       final newTransferred = alreadyTransferred + availableProfit;
-      final fullyTransferred = newTransferred >= netProfit;
+      final fullyTransferred = newTransferred >= skShare;
       final patch = <String, dynamic>{
         'users/${widget.uid}/wallet': newBalance,
         'users/${widget.uid}/txns/$txnId': {'title': 'Match Profit Transfer', 'sub': '${data['title'] ?? account['title']} • $dt', 'amt': availableProfit, 'status': 'CREDITED', 'time': dt},
@@ -938,9 +938,10 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (ctx, setDialogState) {
           final collection = _num(data['collection']);
           final prize = _num(data['prizeSent']);
-          final profit = collection - prize;
+          final profit = collection - prize - _matchExpenses(data);
+          final skShare = profit > 0 ? (profit * 0.75).round() : 0;
           final transferredAmount = _num(data['transferredAmount']);
-          final available = profit - transferredAmount;
+          final available = skShare - transferredAmount;
           return AlertDialog(
             title: Text('₹ Hisaab • $title', style: const TextStyle(fontSize: 16)),
             content: Column(
