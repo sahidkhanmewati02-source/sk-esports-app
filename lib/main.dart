@@ -2289,10 +2289,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(8)),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Entry: ₹$fee × $teamSize = ₹$baseTotal'),
-                      Text('Pay from Main Wallet: ₹$payable', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    ]),
+                    child: Text(
+                      'Total Entry Fee: ₹$baseTotal',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
                   ),
                 ]),
               ),
@@ -2340,8 +2340,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     'joinedAt': now.millisecondsSinceEpoch,
                     'feePaid': payable,
                     'baseFee': baseTotal,
-                    // Legacy Firebase rules compatibility only; Bonus Wallet is disabled.
-                    'bonusDiscount': 0,
                     if (adminSelectionEnabled) 'selectedAdminUid': selectedAdminUid,
                     if (adminSelectionEnabled) 'selectedAdminName': (selectedAdmin['name'] ?? 'Admin').toString(),
                   };
