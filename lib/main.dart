@@ -739,10 +739,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _recoverMissingProfileInHome() async {
-    final profileUrl = Uri.parse('$kDbUrl/users/\${widget.uid}.json?auth=\${widget.token}');
+    final profileUrl = Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}');
     final before = await http.get(profileUrl).timeout(const Duration(seconds: 20));
     if (before.statusCode != 200) {
-      throw Exception('Profile check failed HTTP \${before.statusCode}: \${before.body}');
+      throw Exception('Profile check failed HTTP ${before.statusCode}: ${before.body}');
     }
     if (before.body.trim() != 'null') return;
 
@@ -764,21 +764,21 @@ class _HomeScreenState extends State<HomeScreen> {
     final save = await http.put(profileUrl, body: jsonEncode(profile))
         .timeout(const Duration(seconds: 20));
     if (save.statusCode < 200 || save.statusCode >= 300) {
-      throw Exception('Missing profile create reject HTTP \${save.statusCode}: \${save.body}. Firebase users/\${widget.uid} write rule publish/check karein. Existing data overwrite nahi hua.');
+      throw Exception('Missing profile create reject HTTP ${save.statusCode}: ${save.body}. Firebase users/${widget.uid} write rule publish/check karein. Existing data overwrite nahi hua.');
     }
     final verify = await http.get(profileUrl).timeout(const Duration(seconds: 20));
     if (verify.statusCode != 200 || verify.body.trim() == 'null') {
-      throw Exception('Profile recovery verify failed HTTP \${verify.statusCode}: \${verify.body}');
+      throw Exception('Profile recovery verify failed HTTP ${verify.statusCode}: ${verify.body}');
     }
 
     // The profile is primary. Secondary indexes are best-effort and never overwrite existing entries.
-    final oldIndexUrl = Uri.parse('$kDbUrl/referralCodes/\${widget.uid}.json?auth=\${widget.token}');
+    final oldIndexUrl = Uri.parse('$kDbUrl/referralCodes/${widget.uid}.json?auth=${widget.token}');
     final oldIndex = await http.get(oldIndexUrl).timeout(const Duration(seconds: 20));
     if (oldIndex.statusCode == 200 && oldIndex.body.trim() == 'null') {
       await http.put(oldIndexUrl,
         body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
     }
-    final lookupUrl = Uri.parse('$kDbUrl/referralLookup/$code.json?auth=\${widget.token}');
+    final lookupUrl = Uri.parse('$kDbUrl/referralLookup/$code.json?auth=${widget.token}');
     final oldLookup = await http.get(lookupUrl).timeout(const Duration(seconds: 20));
     if (oldLookup.statusCode == 200 && oldLookup.body.trim() == 'null') {
       await http.put(lookupUrl,
@@ -819,9 +819,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (uRes.statusCode != 200) throw Exception('Profile read failed (${uRes.statusCode}); UID/session ya Rules mismatch ho sakta hai. Data overwrite nahi kiya.');
       if (uRes.body.trim() == 'null') {
         await _recoverMissingProfileInHome();
-        final recovered = await http.get(Uri.parse('$kDbUrl/users/\${widget.uid}.json?auth=\${widget.token}'));
+        final recovered = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
         if (recovered.statusCode != 200 || recovered.body.trim() == 'null') {
-          throw Exception('Is UID ka profile abhi bhi nahi mila. Recovery result: HTTP \${recovered.statusCode} \${recovered.body}');
+          throw Exception('Is UID ka profile abhi bhi nahi mila. Recovery result: HTTP ${recovered.statusCode} ${recovered.body}');
         }
         uRes.body = recovered.body;
       }
