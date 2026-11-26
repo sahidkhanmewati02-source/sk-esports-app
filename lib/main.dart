@@ -299,6 +299,54 @@ class _AuthScreenState extends State<AuthScreen> {
     return users is List && users.isNotEmpty && users.first['emailVerified'] == true;
   }
 
+  Future<void> _recoverMissingProfile({required String uid, required String token, required String email}) async {
+    final profileUrl = Uri.parse('$kDbUrl/users/$uid.json?auth=$token');
+    final existing = await http.get(profileUrl).timeout(const Duration(seconds: 20));
+    if (existing.statusCode != 200) {
+      throw Exception('Profile check failed (HTTP \${existing.statusCode}). Firebase Rules check karein; existing data untouched hai.');
+    }
+    if (existing.body.trim() != 'null') return;
+
+    // Recover an Auth account whose original signup stopped before RTDB profile creation.
+    // This runs only when the profile endpoint is actually null; existing data is never PUT over.
+    final recoveredName = email.split('@').first.trim();
+    final code = await _createUniqueReferralCode(name: recoveredName, uid: uid, token: token);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final profile = <String, dynamic>{
+      'email': email,
+      'ign': recoveredName.isEmpty ? 'SK_Player' : recoveredName,
+      'bgmiId': 'Not Set',
+      'wallet': 0,
+      'referralCode': code,
+      'referralCount': 0,
+      'referralEarnings': 0,
+    };
+    final save = await http.put(profileUrl, body: jsonEncode(profile)).timeout(const Duration(seconds: 20));
+    if (save.statusCode < 200 || save.statusCode >= 300) {
+      throw Exception('Auth account mil gaya, lekin missing profile create nahi hua (HTTP \${save.statusCode}). Firebase users/$uid write rule check karein. Koi existing profile overwrite nahi kiya.');
+    }
+    final verify = await http.get(profileUrl).timeout(const Duration(seconds: 20));
+    if (verify.statusCode != 200 || verify.body.trim() == 'null') {
+      throw Exception('Profile recovery verify nahi hui. Firebase data ko dobara check karein.');
+    }
+
+    // Secondary referral indexes must not prevent login once the profile is safely created.
+    final legacy = await http.put(
+      Uri.parse('$kDbUrl/referralCodes/$uid.json?auth=$token'),
+      body: jsonEncode({'uid': uid, 'createdAt': now}),
+    );
+    final lookup = await http.put(
+      Uri.parse('$kDbUrl/referralLookup/$code.json?auth=$token'),
+      body: jsonEncode({'uid': uid, 'createdAt': now}),
+    );
+    if (legacy.statusCode < 200 || legacy.statusCode >= 300 ||
+        lookup.statusCode < 200 || lookup.statusCode >= 300) {
+      _msg('Profile recover ho gaya, lekin referral index mein se ek save nahi hua. Admin se rules check karwayein.');
+    } else {
+      _msg('Purana Auth account safely recover ho gaya. Profile aur referral code create ho gaye.');
+    }
+  }
+
   Future _submit() async {
     final e = _email.text.trim(), p = _pass.text.trim();
     if (!e.contains('@') || !RegExp(r'^.{6,}$').hasMatch(p)) {
@@ -326,6 +374,7 @@ class _AuthScreenState extends State<AuthScreen> {
           await _sendVerificationEmail(token);
           throw Exception('Aapka Gmail abhi verify nahi hua. Inbox/Spam mein verification link check karein; naya link bhej diya hai. Link verify karke phir login karein.');
         }
+        await _recoverMissingProfile(uid: uid, token: token, email: e);
       }
       String? referredBy;
       if (!_isLogin && _referral.text.trim().isNotEmpty) {
@@ -2845,18 +2894,40 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+  Future<String> _freshReferralIdToken() async {
+    final sp = await SharedPreferences.getInstance();
+    final refreshToken = sp.getString('rt');
+    if (refreshToken == null || refreshToken.isEmpty) {
+      throw Exception('Session refresh token nahi mila. Logout karke dobara login karein.');
+    }
+    final response = await http.post(
+      Uri.parse('https://securetoken.googleapis.com/v1/token?key=$kApiKey'),
+      body: {'grant_type': 'refresh_token', 'refresh_token': refreshToken},
+    ).timeout(const Duration(seconds: 20));
+    final data = jsonDecode(response.body);
+    if (response.statusCode != 200) {
+      throw Exception('Fresh Firebase session nahi mila (\${data['error']?['message'] ?? response.statusCode}). Logout karke login karein.');
+    }
+    await sp.setString('rt', data['refresh_token'].toString());
+    return data['id_token'].toString();
+  }
+
   Future<void> _changeReferralCodeForUser(Map user) async {
     if (!isSuperAdmin) return;
     final targetUid = (user['uid'] ?? widget.uid).toString();
-    final oldCode = (user['referralCode'] ?? (targetUid == widget.uid ? _referralCode : '')).toString();
+    final oldCode = (user['referralCode'] ?? (targetUid == widget.uid ? _referralCode : '')).toString().toUpperCase();
     final controller = TextEditingController(text: oldCode);
     final picked = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Referral Code • ${user['ign'] ?? user['email'] ?? 'Player'}'),
-        content: TextField(controller: controller, textCapitalization: TextCapitalization.characters,
+        title: Text('Referral Code • \${user['ign'] ?? user['email'] ?? 'Player'}'),
+        content: TextField(
+          controller: controller,
+          textCapitalization: TextCapitalization.characters,
           inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]'))],
-          maxLength: 12, decoration: const InputDecoration(labelText: 'Custom code', hintText: 'SKSAHID', helperText: '4–12 letters/numbers')),
+          maxLength: 12,
+          decoration: const InputDecoration(labelText: 'Custom code', hintText: 'SKSAHIDYT', helperText: '4–12 letters/numbers'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(onPressed: () => Navigator.pop(ctx, controller.text.trim().toUpperCase()), child: const Text('Save')),
@@ -2865,38 +2936,61 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     controller.dispose();
     if (picked == null) return;
-    if (picked.length < 4 || picked.length > 12 || picked.contains(RegExp(r'[^A-Z0-9]'))) return _msg('Code 4 se 12 letters/numbers ka hona chahiye.');
-    final newUrl = Uri.parse(kDbUrl + '/referralLookup/' + picked + '.json?auth=' + widget.token);
-    final check = await http.get(newUrl);
-    if (check.statusCode != 200) return _msg('Code check nahi ho paya. Firebase Rules check karein.');
-    if (check.body != 'null') {
-      final existing = jsonDecode(check.body);
-      if (existing is! Map || existing['uid']?.toString() != targetUid) return _msg('Ye referral code kisi aur player ka hai.');
+    if (picked.length < 4 || picked.length > 12 || RegExp(r'[^A-Z0-9]').hasMatch(picked)) {
+      return _msg('Code 4 se 12 letters/numbers ka hona chahiye.');
     }
-    // Commit the profile code and lookup entry together. Keep the previous
-    // lookup as a permanent alias so existing referral links/history are not broken.
-    final patch = <String, dynamic>{
-      'users/$targetUid/referralCode': picked,
-      'referralLookup/$picked': {'uid': targetUid, 'createdAt': DateTime.now().millisecondsSinceEpoch},
-    };
-    final save = await http.patch(
-      Uri.parse('$kDbUrl/.json?auth=${widget.token}'),
-      body: jsonEncode(patch),
-    );
-    if (save.statusCode < 200 || save.statusCode >= 300) {
-      return _msg('Referral update reject hua (HTTP ${save.statusCode}). Purana code aur lookup safe rakhe gaye.');
-    }
-    if (oldCode.isNotEmpty && oldCode != picked) {
-      final oldUrl = Uri.parse(kDbUrl + '/referralLookup/' + oldCode + '.json?auth=' + widget.token);
-      final oldRes = await http.get(oldUrl);
-      if (oldRes.statusCode == 200 && oldRes.body != 'null') {
-        final oldData = jsonDecode(oldRes.body);
-        if (oldData is Map && oldData['uid']?.toString() == targetUid) await http.delete(oldUrl);
+
+    try {
+      final token = await _freshReferralIdToken();
+      final lookupUrl = Uri.parse('$kDbUrl/referralLookup/$picked.json?auth=$token');
+      final check = await http.get(lookupUrl).timeout(const Duration(seconds: 20));
+      if (check.statusCode != 200) throw Exception('Referral code check failed (HTTP \${check.statusCode}).');
+      var mappingAlreadyOwned = false;
+      if (check.body.trim() != 'null') {
+        final existing = jsonDecode(check.body);
+        if (existing is! Map || existing['uid']?.toString() != targetUid) {
+          throw Exception('Ye referral code kisi aur player ka hai.');
+        }
+        mappingAlreadyOwned = true;
       }
+
+      // Write authorized leaf paths separately, not a root-level PATCH.
+      // Keep the previous lookup as an alias so old referral links remain valid.
+      if (!mappingAlreadyOwned) {
+        final mappingSave = await http.put(
+          lookupUrl,
+          body: jsonEncode({'uid': targetUid, 'createdAt': DateTime.now().millisecondsSinceEpoch}),
+        ).timeout(const Duration(seconds: 20));
+        if (mappingSave.statusCode < 200 || mappingSave.statusCode >= 300) {
+          throw Exception('Referral lookup save reject hua (HTTP \${mappingSave.statusCode}).');
+        }
+      }
+
+      final profileSave = await http.put(
+        Uri.parse('$kDbUrl/users/$targetUid/referralCode.json?auth=$token'),
+        body: jsonEncode(picked),
+      ).timeout(const Duration(seconds: 20));
+      if (profileSave.statusCode < 200 || profileSave.statusCode >= 300) {
+        if (!mappingAlreadyOwned) {
+          final verifyMapping = await http.get(lookupUrl);
+          if (verifyMapping.statusCode == 200 && verifyMapping.body.contains(targetUid)) {
+            await http.delete(lookupUrl);
+          }
+        }
+        throw Exception('Profile referralCode save reject hua (HTTP \${profileSave.statusCode}).');
+      }
+
+      if (mounted) {
+        setState(() {
+          if (targetUid == widget.uid) _referralCode = picked;
+          final index = _users.indexWhere((entry) => (entry['uid'] ?? '').toString() == targetUid);
+          if (index >= 0) _users[index]['referralCode'] = picked;
+        });
+      }
+      _msg('Referral code update ho gaya: $picked. Purana code alias safe rakha hai.');
+    } catch (err) {
+      _msg(err.toString().replaceFirst('Exception: ', ''));
     }
-    if (targetUid == widget.uid && mounted) setState(() => _referralCode = picked);
-    _msg('Referral code update ho gaya: $picked');
-    _sync();
   }
   Widget _referralCard() {
     final code = _referralCode.isEmpty ? 'Recovery pending' : _referralCode;
