@@ -2153,6 +2153,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ? List<Map<String,dynamic>>.from((match['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)))
         : <Map<String,dynamic>>[];
     final selected = <String>{...existing.map((x) => (x['uid'] ?? '').toString()).where((x) => x.isNotEmpty)};
+    bool enabled = match['adminSelectionEnabled'] == true || existing.isNotEmpty;
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) {
@@ -2162,10 +2163,10 @@ class _HomeScreenState extends State<HomeScreen> {
             width: double.maxFinite,
             height: 440,
             child: Column(children: [
-              const Align(alignment: Alignment.centerLeft, child: Text('Select the admins players must choose before joining this match:', style: TextStyle(fontWeight: FontWeight.bold))),
-              const SizedBox(height: 6),
-              const Text('At least one selected admin makes selection compulsory. Leave all unchecked to turn voting OFF.', style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+              SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Admin Voting ON / OFF'), subtitle: const Text('ON: Player must select one admin before joining. OFF: Selection not required.'), value: enabled, onChanged: (v) => setDialogState(() => enabled = v)),
               const Divider(),
+              const Align(alignment: Alignment.centerLeft, child: Text('Select admins for this match:', style: TextStyle(fontWeight: FontWeight.bold))),
+              const SizedBox(height: 6),
               const SizedBox(height: 6),
               Expanded(child: ListView(
                 children: available.map((a) {
@@ -2189,8 +2190,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ElevatedButton(
               onPressed: () async {
                 final chosen = available.where((a) => selected.contains((a['uid'] ?? '').toString())).map((a) => {'uid': a['uid'], 'name': a['name'], 'role': a['role'], 'isSuperAdmin': a['isSuperAdmin'] == true}).toList();
-                final enabled = chosen.isNotEmpty;
-                final payload = {'adminSelectionEnabled': enabled, 'votingAdmins': chosen};
+                if (enabled && chosen.isEmpty) return _msg('Voting ON karne ke liye kam se kam ek admin select karein.');
+                final payload = {'adminSelectionEnabled': enabled, 'votingAdmins': enabled ? chosen : <Map<String,dynamic>>[]};
                 final res = await http.patch(
                   Uri.parse('$kDbUrl/matches/${match['id']}.json?auth=${widget.token}'),
                   body: jsonEncode(payload),
@@ -2199,7 +2200,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 match.addAll(payload);
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (mounted) setState(() {});
-                _msg(enabled ? '${chosen.length} Voting Admins saved. Players must select one before joining.' : 'Is match mein Admin Voting OFF hai.');
+                _msg(enabled ? '${chosen.length} Voting Admins saved. Player join se pehle admin select karega.' : 'Admin Voting OFF saved.');
               },
               child: const Text('Save Match Admins'),
             ),
