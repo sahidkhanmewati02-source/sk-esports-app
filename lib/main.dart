@@ -1173,57 +1173,149 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute<void>(
         builder: (ctx) => Scaffold(
-        appBar: AppBar(
-          title: const Text('SK eSports Finance', style: TextStyle(color: Color(0xFFFF9800))),
-          backgroundColor: const Color(0xFF161B22),
-        ),
-        body: StatefulBuilder(
+          appBar: AppBar(
+            title: const Text('SK eSports Finance', style: TextStyle(color: Color(0xFFFF9800))),
+            backgroundColor: const Color(0xFF161B22),
+          ),
+          body: StatefulBuilder(
         builder: (ctx, setD) {
-          refreshFinance = setD;
-          if (loading) {
-            return const Center(child: CircularProgressIndicator());
+          final collection = accounts.fold<int>(0, (n, a) => n + _num(a['collection']));
+          final prizes = accounts.fold<int>(0, (n, a) => n + _num(a['prizeSent']));
+          final expenses = accounts.fold<int>(0, (n, a) => n + _matchExpenses(a));
+          final net = collection - prizes - expenses;
+          final players = <Map<String, dynamic>>[];
+          for (final a in accounts) {
+            final m = a['match'] as Map;
+            final roster = m['players'] is Map ? m['players'] as Map : <dynamic, dynamic>{};
+            for (final e in roster.entries) {
+              final p = e.value is Map ? Map<String, dynamic>.from(e.value as Map) : <String, dynamic>{};
+              players.add({'match': a['title'], ...p});
+            }
           }
-          if (loadError != null && accounts.isEmpty) {
-            return Center(child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.error_outline, color: Colors.orange, size: 36),
-                const SizedBox(height: 12),
-                Text('Finance load failed: $loadError', textAlign: TextAlign.center),
-                const SizedBox(height: 12),
-                ElevatedButton(onPressed: () => _showFinanceDashboard(), child: const Text('Retry')),
-              ]),
-            ));
+          Widget metric(String label, String value) {
+            return Card(child: ListTile(title: Text(label), trailing: Text(value, style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))));
           }
-
-
-const String kApiKey = 'AIzaSyDdXPfU6_RkgFXyq58nUeEFIQI3JI_nVf0';
-const String kDbUrl = 'https://sk-esports-live-default-rtdb.asia-southeast1.firebasedatabase.app';
-const String kAdmin = 'sahidkhanmewati02@gmail.com';
-
-void main() => runApp(MaterialApp(
-      title: 'SK ESPORTS',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF0D1117),
-        cardColor: const Color(0xFF161B22),
+          Widget page;
+          if (tab == 0) {
+            page = ListView(children: [
+              metric('Total Collection', '₹' + collection.toString()),
+              metric('Player Prizes', '₹' + prizes.toString()),
+              metric('Expenses', '₹' + expenses.toString()),
+              metric('Net Profit', '₹' + net.toString()),
+              metric('Admins Pool • 25%', '₹' + (net > 0 ? net * .25 : 0).toStringAsFixed(2)),
+              metric('SK eSports • 75%', '₹' + (net > 0 ? net * .75 : 0).toStringAsFixed(2)),
+            ]);
+          } else if (tab == 1) {
+            final widgets = <Widget>[];
+            for (final a in accounts) {
+              final m = a['match'] as Map;
+              final profit = _num(a['collection']) - _num(a['prizeSent']) - _matchExpenses(a);
+              final total = _matchIndividualPlayerCount(m);
+              final paid = a['adminPayments'] is Map ? a['adminPayments'] as Map : <dynamic, dynamic>{};
+              final rows = _adminLeaderboardRows(m);
+              final adminWidgets = <Widget>[];
+              for (final r in rows) {
+                final count = _num(r['count']);
+                final amount = profit > 0 ? (profit * .25 * count / (total == 0 ? 1 : total)).round() : 0;
+                final status = paid[r['uid']] is Map ? paid[r['uid']]['status'] : 'PENDING';
+                adminWidgets.add(ListTile(
+                  dense: true,
+                  title: Text(r['name'].toString() + ' • ' + count.toString() + ' players'),
+                  subtitle: Text((total == 0 ? 0 : 25 * count / total).toStringAsFixed(2) + '% of Net Profit • ₹' + amount.toString() + ' • ' + status.toString()),
+                  trailing: status == 'PAID' ? const Text('PAID') : TextButton(onPressed: () => _payAdminShare(m, Map<String, dynamic>.from(r)), child: const Text('Add to Wallet')),
+                ));
+              }
+              widgets.add(Card(child: Column(children: [
+                ListTile(title: Text(a['title'].toString()), subtitle: Text('Collection ₹' + a['collection'].toString() + ' • Net ₹' + profit.toString())),
+                ...adminWidgets,
+                if (isSuperAdmin)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _configureMatchVotingAdmins(m),
+                        icon: const Icon(Icons.how_to_vote),
+                        label: Text(m['adminSelectionEnabled'] == true ? 'MANAGE VOTING ADMINS' : 'ADD ADMINS FOR THIS MATCH'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF9800),
+                          foregroundColor: Colors.black,
+                          minimumSize: const Size.fromHeight(46),
+                        ),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showAdminSelectionLeaderboard(m); }, icon: const Icon(Icons.poll, size: 16), label: const Text('Admin Picks')),
+                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _addMatchExpense(m); }, icon: const Icon(Icons.add, size: 16), label: const Text('Add Expense')),
+                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showMatchHisaab(m); }, icon: const Icon(Icons.receipt_long, size: 16), label: const Text('Hisaab')),
+                    ],
+                  ),
+                ),
+              ])));
+            }
+            page = ListView(children: widgets);
+          } else if (tab == 2) {
+            final widgets = <Widget>[];
+            for (final p in players) {
+              final members = p['members'] is List ? p['members'] as List : [p];
+              final ids = members.whereType<Map>().map((x) => (x['bgmiId'] ?? '').toString()).where((x) => x.isNotEmpty).toList();
+              widgets.add(ListTile(
+                title: Text((p['ign'] ?? 'Player').toString() + ' • ' + p['match'].toString()),
+                subtitle: Text('Admin: ' + (p['selectedAdminName'] ?? '-').toString() + ' • Kills: ' + (p['kills'] ?? 0).toString() + ' • Entry: ₹' + (p['feePaid'] ?? 0).toString() + ' • Reward: ₹' + (p['reward'] ?? 0).toString() + '\n' + (ids.toSet().length != ids.length ? 'Duplicate ID' : 'ID OK') + ' • ' + (p['refundStatus'] ?? 'No refund').toString()),
+              ));
+            }
+            page = ListView(children: widgets);
+          } else if (tab == 3) {
+            final widgets = <Widget>[];
+            for (final a in accounts) {
+              widgets.add(ListTile(title: Text(a['title'].toString()), trailing: Text('₹' + _matchExpenses(a).toString())));
+              if (a['expenses'] is Map) {
+                for (final x in (a['expenses'] as Map).values.whereType<Map>()) {
+                  widgets.add(ListTile(title: Text((x['note'] ?? 'Expense').toString() + ' • ₹' + (x['amount'] ?? 0).toString()), subtitle: Text('UTR / Proof: ' + (x['proof'] ?? '-').toString())));
+                }
+              }
+              widgets.add(TextButton(onPressed: () { Navigator.pop(ctx); _addMatchExpense(a['match'] as Map); }, child: const Text('Add Expense')));
+            }
+            page = ListView(children: widgets);
+          } else {
+            final widgets = <Widget>[const ListTile(title: Text('Admin Share Payments'))];
+            for (final a in accounts) {
+              if (a['adminPayments'] is Map) {
+                for (final payment in (a['adminPayments'] as Map).values.whereType<Map>()) {
+                  widgets.add(ListTile(title: Text((payment['name'] ?? 'Admin').toString() + ' • ' + a['title'].toString()), subtitle: Text((payment['status'] ?? 'PENDING').toString() + ' • UTR / Proof: ' + (payment['utr'] ?? payment['proof'] ?? 'Wallet credit').toString()), trailing: Text('₹' + (payment['amount'] ?? 0).toString())));
+                }
+              }
+            }
+            widgets.add(const Divider());
+            widgets.add(const ListTile(title: Text('Deposits / Withdrawals • UTR / Proof')));
+            for (final p in deposits) {
+              widgets.add(ListTile(dense: true, title: Text('Deposit • ' + (p['status'] ?? 'PENDING').toString() + ' • ₹' + (p['amt'] ?? p['amount'] ?? 0).toString()), subtitle: Text('UTR: ' + (p['utr'] ?? '-').toString() + ' • Proof: ' + (p['proof'] ?? p['screenshot'] ?? '-').toString())));
+            }
+            for (final p in withdrawals) {
+              widgets.add(ListTile(dense: true, title: Text('Withdrawal • ' + (p['status'] ?? 'PENDING').toString() + ' • ₹' + (p['amt'] ?? 0).toString()), subtitle: Text('UTR: ' + (p['utr'] ?? '-').toString())));
+            }
+            page = ListView(children: widgets);
+          }
+          return Column(children: [
+            SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+              for (var i = 0; i < 5; i++) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(['Overview', 'Match Manager', 'All Players', 'Expenses', 'Payments'][i]), selected: tab == i, onSelected: (_) => setD(() => tab = i))),
+            ])),
+            Expanded(child: page),
+          ]);
+        },
       ),
-      home: const AuthScreen(),
-    ));
-
-Uri? _resolveAdTarget(String raw) {
-  final value = raw.trim();
-  if (value.startsWith('intent://')) {
-    final fallback = RegExp(r'S\.browser_fallback_url=([^;]+)').firstMatch(value);
-    if (fallback != null) {
-      final decoded = Uri.decodeComponent(fallback.group(1)!);
-      final parsed = Uri.tryParse(decoded);
-      if (parsed != null && (parsed.scheme == 'https' || parsed.scheme == 'http')) return parsed;
-    }
-    final hostPath = value.substring('intent://'.length).split('#Intent;').first;
-    return Uri.tryParse('https://$hostPath');
+      ),
+      ),
+    );
     Future<void>(() async {
-            try {
+          try {
             // Load every match account and both transaction lists concurrently.
             // The old sequential awaits made Finance feel unresponsive as match count grew.
             final matchJobs = _matches.map((m) async {
@@ -1261,13 +1353,14 @@ Uri? _resolveAdTarget(String raw) {
           } catch (e) {
             _msg('Finance load warning: ' + e.toString());
           }
-          if (!mounted) return;
+      } catch (e) {
+        loadError = e.toString();
+      }
       loading = false;
       refreshFinance?.call(() {});
     });
     await routeFuture;
   }
-
 
 
   Future _saveTxn(String uid, int bal, String title, String sub, int amt, String status) async {
