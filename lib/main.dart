@@ -1306,6 +1306,61 @@ class _HomeScreenState extends State<HomeScreen> {
         refreshFinance?.call(() {});
       }
     }
+    Future<void> showFinanceHisaab(BuildContext pageContext, Map account) async {
+      final data = Map<String,dynamic>.from(account);
+      final match = account['match'] is Map
+          ? Map<String,dynamic>.from(account['match'] as Map)
+          : <String,dynamic>{'id':account['id'],'title':account['title'],'players':<String,dynamic>{}};
+      final id = (account['id'] ?? '').toString();
+      final title = (account['title'] ?? 'Match').toString();
+      bool transferring = false;
+      await showDialog<void>(
+        context: pageContext,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            final collection = _num(data['collection']);
+            final prize = _num(data['prizeSent']);
+            final expenses = _matchExpenses(data);
+            final netProfit = collection - prize - expenses;
+            final skShare = netProfit > 0 ? (netProfit * 0.75).round() : 0;
+            final alreadyTransferred = _num(data['transferredAmount']);
+            final available = skShare - alreadyTransferred;
+            return AlertDialog(
+              title: Text('₹ Hisaab • $title', style: const TextStyle(fontSize: 16)),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                _hisaabRow('Total Collection', collection, const Color(0xFF00E676)),
+                _hisaabRow('Prize Sent', prize, const Color(0xFFFF9800)),
+                _hisaabRow('Match Expenses', expenses, Colors.redAccent),
+                const Divider(),
+                _hisaabRow('Net Profit', netProfit, netProfit >= 0 ? const Color(0xFF00E676) : Colors.redAccent),
+                _hisaabRow('Admins Pool • 25%', netProfit > 0 ? (netProfit * 0.25).round() : 0, Colors.amber),
+                _hisaabRow('SK eSports Share • 75%', skShare, const Color(0xFF00E676)),
+                if (alreadyTransferred > 0) _hisaabRow('Already Transferred', alreadyTransferred, Colors.lightBlueAccent),
+                if (available > 0 && alreadyTransferred > 0) _hisaabRow('Available to Transfer', available, const Color(0xFF00E676)),
+                if (isSuperAdmin && available > 0) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(width: double.infinity, child: ElevatedButton.icon(
+                    onPressed: transferring ? null : () async {
+                      setDialogState(() => transferring = true);
+                      await _transferMatchProfit({'id':id,'title':title,'match':match});
+                      try {
+                        final latest = await _readMatchHisaab(id,title);
+                        if (dialogContext.mounted) setDialogState(() { data..clear()..addAll(latest); transferring = false; });
+                      } catch (_) {
+                        if (dialogContext.mounted) setDialogState(() => transferring = false);
+                      }
+                    },
+                    icon: transferring ? const Icon(Icons.hourglass_top) : const Icon(Icons.account_balance_wallet),
+                    label: const Text('Transfer Profit to Main Wallet'),
+                  )),
+                ],
+              ]),
+              actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close'))],
+            );
+          },
+        ),
+      );
+    }
     final routeFuture = Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
@@ -1316,7 +1371,7 @@ class _HomeScreenState extends State<HomeScreen> {
             actions: [
               IconButton(
                 tooltip: 'Refresh Finance',
-                onPressed: loading ? null : reloadFinance,
+                onPressed: reloadFinance,
                 icon: const Icon(Icons.refresh),
               ),
             ],
@@ -1324,7 +1379,16 @@ class _HomeScreenState extends State<HomeScreen> {
           body: StatefulBuilder(
             builder: (ctx, setD) {
               refreshFinance = setD;
-              if (loading && !hasLoaded) return const Center(child: CircularProgressIndicator());
+              if (loading && !hasLoaded) return Center(child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.account_balance_wallet_outlined, size: 42, color: Color(0xFFFF9800)),
+                  const SizedBox(height: 12),
+                  const Text('Finance data load ho raha hai. Upar Refresh dabakar dobara try karein.', textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(onPressed: reloadFinance, icon: const Icon(Icons.refresh), label: const Text('Refresh Finance')),
+                ]),
+              ));
               if (loadError != null && accounts.isEmpty) {
                 return Center(child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -1452,7 +1516,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showAdminSelectionLeaderboard(m); }, icon: const Icon(Icons.poll, size: 16), label: const Text('Admin Picks')),
 
-                      OutlinedButton.icon(onPressed: () { _showMatchHisaab(m); }, icon: const Icon(Icons.receipt_long, size: 16), label: const Text('Hisaab')),
+                      OutlinedButton.icon(
+                        onPressed: () => showFinanceHisaab(ctx, a),
+                        icon: const Icon(Icons.receipt_long, size: 16),
+                        label: const Text('Hisaab'),
+                      ),
                     ],
                   ),
                 ),
