@@ -1129,7 +1129,6 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 8),
           IconButton(tooltip: 'UPI / QR', onPressed: isSuperAdmin ? _showPaymentSettingsDialog : _deposit, icon: const Icon(Icons.qr_code_2, color: Color(0xFFFF9800))),
         ]),
-        if (isSuperAdmin) Padding(padding: const EdgeInsets.only(bottom: 8), child: SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: _showFinanceDashboard, icon: const Icon(Icons.analytics), label: const Text('Open SK eSports Finance Dashboard')))),
         Row(children: [
           Expanded(child: _walletMetric('All-time Credits', '₹$credits', Icons.trending_up, const Color(0xFF00E676))),
           const SizedBox(width: 8),
@@ -2982,9 +2981,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     ]),
 ]; 
-    final navPages = isAdmin
-        ? [pages[0], pages[3], pages[4], pages[2]]
-        : [pages[0], pages[3], pages[2]];
+    // Keep Wallet in its original second-tab position for players and Co-Admins.
+    // Super Admin gets the Finance dashboard in that same second-tab position.
+    final navPages = isSuperAdmin
+        ? [pages[0], pages[1], pages[3], pages[4], pages[2]]
+        : isAdmin
+            ? [pages[0], pages[1], pages[3], pages[4], pages[2]]
+            : [pages[0], pages[1], pages[3], pages[2]];
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
@@ -3019,9 +3022,19 @@ class _HomeScreenState extends State<HomeScreen> {
         type: BottomNavigationBarType.fixed,
         currentIndex: _tab,
         selectedItemColor: const Color(0xFFFF9800),
-        onTap: (i) => setState(() => _tab = i),
+        onTap: (i) {
+          if (isSuperAdmin && i == 1) {
+            _showFinanceDashboard();
+            return;
+          }
+          setState(() => _tab = i);
+        },
         items: [
           const BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: 'Matches'),
+          BottomNavigationBarItem(
+            icon: Icon(isSuperAdmin ? Icons.analytics : Icons.account_balance_wallet),
+            label: isSuperAdmin ? 'Finance' : 'Wallet',
+          ),
           const BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
           if (isAdmin) const BottomNavigationBarItem(icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
           const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
