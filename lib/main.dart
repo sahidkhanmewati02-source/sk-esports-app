@@ -808,7 +808,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _qrC.text = _qrUrl;
 
       final uRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
-      if (uRes.statusCode == 200 && uRes.body != 'null') {
+      if (uRes.statusCode != 200) throw Exception('Profile read failed (${uRes.statusCode}); UID/session ya Rules mismatch ho sakta hai. Data overwrite nahi kiya.');
+      if (uRes.body == 'null') throw Exception('Is UID ka profile nahi mila. Koi naya profile create/overwrite nahi kiya.');
+      {
         final d = jsonDecode(uRes.body);
         _ign = d['ign'] ?? 'SK_Player';
         _bgmiId = d['bgmiId'] ?? 'Not Set';
@@ -819,7 +821,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _referralEarnings = _num(d['referralEarnings']);
         _referredBy = (d['referredBy'] ?? '').toString();
         final referralHistoryRes = await http.get(Uri.parse('$kDbUrl/referralCodes/${widget.uid}/referrals.json?auth=${widget.token}'));
-        if (referralHistoryRes.statusCode == 200 && referralHistoryRes.body != 'null') {
+        if (referralHistoryRes.statusCode != 200) throw Exception('Referral history read failed (${referralHistoryRes.statusCode}); history ko empty nahi maana gaya.');
+        if (referralHistoryRes.body != 'null') {
           final referralData = jsonDecode(referralHistoryRes.body);
           _referralHistory = referralData is Map
               ? referralData.entries.where((e) => e.value is Map).map((e) => <String, dynamic>{'uid': e.key.toString(), ...Map<String, dynamic>.from(e.value as Map)}).toList()
@@ -842,31 +845,32 @@ class _HomeScreenState extends State<HomeScreen> {
           };
           await _putRewards(migrated);
         }
+        // Never replace a missing/UID-like custom code automatically.
+        // Recover it only when an existing lookup entry points to this exact UID.
         if (_referralCode.isEmpty || _referralCode == widget.uid) {
-          final generatedCode = await _createUniqueReferralCode(name: _ign, uid: widget.uid, token: widget.token, admin: isSuperAdmin);
-          final profileSave = await http.put(
-            Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'),
-            body: jsonEncode(generatedCode),
-          );
-          if (profileSave.statusCode < 200 || profileSave.statusCode >= 300) {
-            throw Exception('Referral code profile mein save nahi hua. Code dobara generate nahi kiya gaya.');
+          final lookupAllRes = await http.get(Uri.parse('$kDbUrl/referralLookup.json?auth=${widget.token}'));
+          if (lookupAllRes.statusCode != 200) throw Exception('Referral lookup read failed (${lookupAllRes.statusCode}); original code overwrite nahi kiya gaya.');
+          if (lookupAllRes.body != 'null') {
+            final allLookups = jsonDecode(lookupAllRes.body);
+            if (allLookups is Map) {
+              for (final entry in allLookups.entries) {
+                final value = entry.value;
+                if (value is Map && value['uid']?.toString() == widget.uid) {
+                  _referralCode = entry.key.toString();
+                  break;
+                }
+              }
+            }
           }
-          _referralCode = generatedCode;
-        }
-        final codeRes = await http.get(Uri.parse('$kDbUrl/referralCodes/${widget.uid}.json?auth=${widget.token}'));
-        if (codeRes.statusCode == 200 && codeRes.body == 'null') {
-          await http.put(Uri.parse('$kDbUrl/referralCodes/${widget.uid}.json?auth=${widget.token}'), body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}));
-        }
-        final lookupRes = await http.get(Uri.parse('$kDbUrl/referralLookup/$_referralCode.json?auth=${widget.token}'));
-        if (lookupRes.statusCode == 200 && lookupRes.body == 'null') {
-          final mappingSave = await http.put(
-            Uri.parse('$kDbUrl/referralLookup/$_referralCode.json?auth=${widget.token}'),
-            body: jsonEncode({'uid': widget.uid, 'createdAt': DateTime.now().millisecondsSinceEpoch}),
-          );
-          if (mappingSave.statusCode < 200 || mappingSave.statusCode >= 300) {
-            _msg('Aapka saved referral code wahi hai, lekin lookup mapping save nahi hui.');
+          if (_referralCode.isNotEmpty) {
+            final restoreRes = await http.put(
+              Uri.parse('$kDbUrl/users/${widget.uid}/referralCode.json?auth=${widget.token}'),
+              body: jsonEncode(_referralCode),
+            );
+            if (restoreRes.statusCode < 200 || restoreRes.statusCode >= 300) _msg('Purana referral code lookup mein mila, profile restore permission nahi mili.');
           }
         }
+        // Normal refresh never creates/deletes referral records.
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
           _txns = (d['txns'] as Map).entries
@@ -880,7 +884,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'));
-      if (mRes.statusCode == 200 && mRes.body != 'null') {
+      if (mRes.statusCode != 200) throw Exception('Matches read failed (${mRes.statusCode}); matches ko write/reset nahi kiya gaya.');
+      if (mRes.body != 'null') {
         final list = [];
         (jsonDecode(mRes.body) as Map).forEach((k, v) {
           if (v is Map) {
@@ -897,23 +902,8 @@ class _HomeScreenState extends State<HomeScreen> {
         // these migration writes and block the admin workflow.
         _sortMatches();
       } else {
-        final def = {'m1': {
-            'title': 'SK ESPORTS Solo Rush #1',
-            'map': 'Erangel',
-            'mode': 'SOLO',
-            'time': 'Today, 08:00 PM',
-            'fee': 30,
-            'kill': 20,
-            'win': 175,
-            'slots': 100,
-            'joined': 0,
-            'rId': '15 min before match',
-            'rPass': '****',
-          }
-        };
-        await http.put(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'), body: jsonEncode(def));
-        _matches = [{'id': 'm1', ...def['m1']!, 'isJoined': false}];
-        _sortMatches();
+        // Empty is displayed as empty. Never seed/overwrite the matches node here.
+        _matches = [];
       }
 
       if (isSuperAdmin) {
@@ -943,10 +933,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (isAdmin) {
         final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
+        if (chatRes.statusCode != 200) throw Exception('Chat read failed (${chatRes.statusCode}); chat ko empty nahi maana gaya.');
         final chats = <Map>[];
         if (chatRes.statusCode == 200 && chatRes.body != 'null') (jsonDecode(chatRes.body) as Map).forEach((k, v) { if (v is Map) chats.add({...v, 'id': k}); });
         _chatMessages = chats;
         final dRes = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
+        if (dRes.statusCode != 200) throw Exception('Deposits read failed (${dRes.statusCode}); records ko empty nahi maana gaya.');
         final deps = [];
         if (dRes.statusCode == 200 && dRes.body != 'null') {
           (jsonDecode(dRes.body) as Map).forEach((k, v) {
@@ -956,6 +948,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _deps = deps.reversed.toList();
 
         final wRes = await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));
+        if (wRes.statusCode != 200) throw Exception('Withdrawals read failed (${wRes.statusCode}); records ko empty nahi maana gaya.');
         final withs = [];
         if (wRes.statusCode == 200 && wRes.body != 'null') {
           (jsonDecode(wRes.body) as Map).forEach((k, v) {
@@ -967,6 +960,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _withs = withs.reversed.toList();
 
         final allRes = await http.get(Uri.parse('$kDbUrl/users.json?auth=${widget.token}'));
+        if (allRes.statusCode != 200) throw Exception('All players read failed (${allRes.statusCode}); players ko empty nahi maana gaya.');
         final usrs = [];
         if (allRes.statusCode == 200 && allRes.body != 'null') {
           (jsonDecode(allRes.body) as Map).forEach((k, v) {
@@ -990,7 +984,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       _aboutLinksC.text = _aboutLinks.map((e) => e['label'].toString() + ' | ' + e['url'].toString()).join('\n');
       _rulesC.text = _rulesText;
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) _msg('Data load ruk gaya: ${e.toString().replaceAll('Exception: ', '')}');
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -2991,7 +2987,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _sync();
   }
   Widget _referralCard() {
-    final code = _referralCode.isEmpty ? widget.uid : _referralCode;
+    final code = _referralCode.isEmpty ? 'Recovery pending' : _referralCode;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
