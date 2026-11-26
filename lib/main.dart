@@ -903,6 +903,49 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
+  Future<void> _deleteFinanceMatch(Map account) async {
+    if (!isSuperAdmin) return;
+    final id = (account['id'] ?? '').toString();
+    if (id.isEmpty) return _msg('Match ID nahi mila.');
+    final title = (account['title'] ?? 'Match').toString();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Match?'),
+        content: Text('$title match aur uska finance hisaab permanently delete ho jayega. Is action ko undo nahi kiya ja sakta.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete Match'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final matchRes = await http.delete(Uri.parse('$kDbUrl/matches/$id.json?auth=${widget.token}')).timeout(const Duration(seconds: 15));
+      if (matchRes.statusCode < 200 || matchRes.statusCode >= 300) {
+        throw Exception('Match delete failed (HTTP ${matchRes.statusCode})');
+      }
+      final hisaabRes = await http.delete(Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${widget.token}')).timeout(const Duration(seconds: 15));
+      if (hisaabRes.statusCode < 200 || hisaabRes.statusCode >= 300) {
+        throw Exception('Match deleted, but finance hisaab delete failed (HTTP ${hisaabRes.statusCode})');
+      }
+      if (mounted) {
+        setState(() {
+          _matches.removeWhere((m) => (m['id'] ?? '').toString() == id);
+          _matchAccounts.removeWhere((a) => (a['id'] ?? '').toString() == id);
+        });
+      }
+      _msg('Match aur uska finance hisaab delete ho gaya.');
+      await _sync();
+    } catch (e) {
+      _msg(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
   Future<void> _showMatchHisaab(Map match) async {
     if (!isAdmin) return;
     final id = match['id'].toString();
@@ -1264,7 +1307,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 ));
               }
               widgets.add(Card(child: Column(children: [
-                ListTile(title: Text(a['title'].toString()), subtitle: Text('Collection ₹' + a['collection'].toString() + ' • Net ₹' + profit.toString())),
+                ListTile(
+                  title: Text(a['title'].toString()),
+                  subtitle: Text('Collection ₹' + a['collection'].toString() + ' • Net ₹' + profit.toString()),
+                  trailing: isSuperAdmin ? IconButton(
+                    tooltip: 'Delete Match',
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                    onPressed: () => _deleteFinanceMatch(a),
+                  ) : null,
+                ),
                 ...adminWidgets,
                 if (isSuperAdmin)
                   Padding(
@@ -1291,7 +1342,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     runSpacing: 6,
                     children: [
                       OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showAdminSelectionLeaderboard(m); }, icon: const Icon(Icons.poll, size: 16), label: const Text('Admin Picks')),
-                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _addMatchExpense(m); }, icon: const Icon(Icons.add, size: 16), label: const Text('Add Expense')),
+
                       OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showMatchHisaab(m); }, icon: const Icon(Icons.receipt_long, size: 16), label: const Text('Hisaab')),
                     ],
                   ),
@@ -1308,18 +1359,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 title: Text((p['ign'] ?? 'Player').toString() + ' • ' + p['match'].toString()),
                 subtitle: Text('Admin: ' + (p['selectedAdminName'] ?? '-').toString() + ' • Kills: ' + (p['kills'] ?? 0).toString() + ' • Entry: ₹' + (p['feePaid'] ?? 0).toString() + ' • Reward: ₹' + (p['reward'] ?? 0).toString() + '\n' + (ids.toSet().length != ids.length ? 'Duplicate ID' : 'ID OK') + ' • ' + (p['refundStatus'] ?? 'No refund').toString()),
               ));
-            }
-            page = ListView(children: widgets);
-          } else if (tab == 3) {
-            final widgets = <Widget>[];
-            for (final a in accounts) {
-              widgets.add(ListTile(title: Text(a['title'].toString()), trailing: Text('₹' + _matchExpenses(a).toString())));
-              if (a['expenses'] is Map) {
-                for (final x in (a['expenses'] as Map).values.whereType<Map>()) {
-                  widgets.add(ListTile(title: Text((x['note'] ?? 'Expense').toString() + ' • ₹' + (x['amount'] ?? 0).toString()), subtitle: Text('UTR / Proof: ' + (x['proof'] ?? '-').toString())));
-                }
-              }
-              widgets.add(TextButton(onPressed: () { Navigator.pop(ctx); _addMatchExpense(a['match'] as Map); }, child: const Text('Add Expense')));
             }
             page = ListView(children: widgets);
           } else {
@@ -1343,7 +1382,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           return Column(children: [
             SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
-              for (var i = 0; i < 5; i++) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(['Overview', 'Match Manager', 'All Players', 'Expenses', 'Payments'][i]), selected: tab == i, onSelected: (_) => setD(() => tab = i))),
+              for (var i = 0; i < 4; i++) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(['Overview', 'Match Manager', 'All Players', 'Payments'][i]), selected: tab == i, onSelected: (_) => setD(() => tab = i))),
             ])),
             Expanded(child: page),
           ]);
