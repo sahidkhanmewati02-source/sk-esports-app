@@ -303,7 +303,7 @@ class _AuthScreenState extends State<AuthScreen> {
     final profileUrl = Uri.parse('$kDbUrl/users/$uid.json?auth=$token');
     final existing = await http.get(profileUrl).timeout(const Duration(seconds: 20));
     if (existing.statusCode != 200) {
-      throw Exception('Profile check failed (HTTP \${existing.statusCode}). Firebase Rules check karein; existing data untouched hai.');
+      throw Exception('Profile check failed (HTTP ${existing.statusCode}). Firebase Rules check karein; existing data untouched hai.');
     }
     if (existing.body.trim() != 'null') return;
 
@@ -323,7 +323,7 @@ class _AuthScreenState extends State<AuthScreen> {
     };
     final save = await http.put(profileUrl, body: jsonEncode(profile)).timeout(const Duration(seconds: 20));
     if (save.statusCode < 200 || save.statusCode >= 300) {
-      throw Exception('Auth account mil gaya, lekin missing profile create nahi hua (HTTP \${save.statusCode}). Firebase users/$uid write rule check karein. Koi existing profile overwrite nahi kiya.');
+      throw Exception('Auth account mil gaya, lekin missing profile create nahi hua (HTTP ${save.statusCode}). Firebase users/$uid write rule check karein. Koi existing profile overwrite nahi kiya.');
     }
     final verify = await http.get(profileUrl).timeout(const Duration(seconds: 20));
     if (verify.statusCode != 200 || verify.body.trim() == 'null') {
@@ -2906,7 +2906,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ).timeout(const Duration(seconds: 20));
     final data = jsonDecode(response.body);
     if (response.statusCode != 200) {
-      throw Exception('Fresh Firebase session nahi mila (\${data['error']?['message'] ?? response.statusCode}). Logout karke login karein.');
+      throw Exception('Fresh Firebase session nahi mila (${data['error']?['message'] ?? response.statusCode}). Logout karke login karein.');
     }
     await sp.setString('rt', data['refresh_token'].toString());
     return data['id_token'].toString();
@@ -2920,7 +2920,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final picked = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Referral Code • \${user['ign'] ?? user['email'] ?? 'Player'}'),
+        title: Text('Referral Code • ${user['ign'] ?? user['email'] ?? 'Player'}'),
         content: TextField(
           controller: controller,
           textCapitalization: TextCapitalization.characters,
@@ -2944,7 +2944,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final token = await _freshReferralIdToken();
       final lookupUrl = Uri.parse('$kDbUrl/referralLookup/$picked.json?auth=$token');
       final check = await http.get(lookupUrl).timeout(const Duration(seconds: 20));
-      if (check.statusCode != 200) throw Exception('Referral code check failed (HTTP \${check.statusCode}).');
+      if (check.statusCode != 200) throw Exception('Referral code check failed (HTTP ${check.statusCode}).');
       var mappingAlreadyOwned = false;
       if (check.body.trim() != 'null') {
         final existing = jsonDecode(check.body);
@@ -2962,7 +2962,7 @@ class _HomeScreenState extends State<HomeScreen> {
           body: jsonEncode({'uid': targetUid, 'createdAt': DateTime.now().millisecondsSinceEpoch}),
         ).timeout(const Duration(seconds: 20));
         if (mappingSave.statusCode < 200 || mappingSave.statusCode >= 300) {
-          throw Exception('Referral lookup save reject hua (HTTP \${mappingSave.statusCode}).');
+          throw Exception('Referral lookup save reject hua (HTTP ${mappingSave.statusCode}).');
         }
       }
 
@@ -2977,7 +2977,7 @@ class _HomeScreenState extends State<HomeScreen> {
             await http.delete(lookupUrl);
           }
         }
-        throw Exception('Profile referralCode save reject hua (HTTP \${profileSave.statusCode}).');
+        throw Exception('Profile referralCode save reject hua (HTTP ${profileSave.statusCode}).');
       }
 
       if (mounted) {
