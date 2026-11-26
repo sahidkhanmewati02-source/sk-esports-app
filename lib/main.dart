@@ -861,9 +861,11 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final match = _matches.firstWhere((m) => m['id'].toString() == id, orElse: () => account['match'] is Map ? Map.from(account['match']) : <String, dynamic>{'id': id, 'title': account['title'], 'fee': 0, 'joined': 0, 'players': {}});
       final data = await _refreshMatchHisaabFromRoster(match);
-      final netProfit = _num(data['collection']) - _num(data['prizeSent']);
+      final expenses = _matchExpenses(data);
+      final netProfit = _num(data['collection']) - _num(data['prizeSent']) - expenses;
+      final skShare = netProfit > 0 ? (netProfit * 0.75).round() : 0;
       final alreadyTransferred = _num(data['transferredAmount']);
-      final availableProfit = netProfit - alreadyTransferred;
+      final availableProfit = skShare - alreadyTransferred;
       if (availableProfit <= 0) return _msg('Koi naya Net Profit transfer ke liye available nahi hai.');
       final walletRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
       if (walletRes.statusCode != 200 || walletRes.body == 'null') throw Exception('Super Admin wallet read nahi hua.');
@@ -946,8 +948,11 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 _hisaabRow('Total Collection', collection, const Color(0xFF00E676)),
                 _hisaabRow('Prize Sent', prize, const Color(0xFFFF9800)),
+                _hisaabRow('Match Expenses', _matchExpenses(data), Colors.redAccent),
                 const Divider(),
-                _hisaabRow('Net Profit', profit, profit >= 0 ? const Color(0xFF00E676) : Colors.redAccent),
+                _hisaabRow('Net Profit', profit - _matchExpenses(data), profit - _matchExpenses(data) >= 0 ? const Color(0xFF00E676) : Colors.redAccent),
+                _hisaabRow('Admins Pool • 25%', (profit - _matchExpenses(data)) > 0 ? ((profit - _matchExpenses(data)) * 0.25).round() : 0, Colors.amber),
+                _hisaabRow('SK eSports Share • 75%', (profit - _matchExpenses(data)) > 0 ? ((profit - _matchExpenses(data)) * 0.75).round() : 0, const Color(0xFF00E676)),
                 if (transferredAmount > 0) _hisaabRow('Already Transferred', transferredAmount, Colors.lightBlueAccent),
                 if (available > 0 && transferredAmount > 0) _hisaabRow('Available to Transfer', available, const Color(0xFF00E676)),
                 if (data['transferred'] == true && available <= 0)
