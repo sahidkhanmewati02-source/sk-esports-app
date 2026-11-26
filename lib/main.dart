@@ -575,8 +575,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic> _rewards = {};
   int _referralCount = 0, _referralEarnings = 0;
   String _referralCode = '', _referredBy = '';
-  bool _applyingReferral = false;
-  final _referralApplyC = TextEditingController();
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
   String _promoImageUrl = '', _promoClickUrl = '';
@@ -607,7 +605,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _matchTicker?.cancel();
     _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose(); _adsterraBannerCodeController.dispose();
-    _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose(); _referralApplyC.dispose();
+    _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose();
     super.dispose();
   }
 
@@ -3043,73 +3041,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _msg(err.toString().replaceFirst('Exception: ', ''));
     }
   }
-  Future<void> _applyReferralCode() async {
-    if (_applyingReferral) return;
-    if (_referredBy.isNotEmpty) return _msg('Referral code pehle hi apply ho chuka hai.');
-    final code = _referralApplyC.text.trim().toUpperCase();
-    if (code.length < 4 || code.length > 12 || RegExp(r'[^A-Z0-9]').hasMatch(code)) {
-      return _msg('Valid referral code dalein (4–12 letters/numbers).');
-    }
-    setState(() => _applyingReferral = true);
-    try {
-      final ownRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
-      if (ownRes.statusCode != 200 || ownRes.body.trim() == 'null') {
-        throw Exception('Apna profile verify nahi ho paya. Dobara try karein.');
-      }
-      final own = jsonDecode(ownRes.body);
-      final already = (own is Map ? own['referredBy'] : null)?.toString() ?? '';
-      if (already.isNotEmpty) {
-        if (mounted) setState(() => _referredBy = already);
-        return _msg('Referral code pehle hi apply ho chuka hai; ab change nahi hoga.');
-      }
-
-      var lookupRes = await http.get(Uri.parse('$kDbUrl/referralLookup/$code.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
-      dynamic mapping;
-      if (lookupRes.statusCode == 200 && lookupRes.body.trim() != 'null') {
-        mapping = jsonDecode(lookupRes.body);
-      } else {
-        lookupRes = await http.get(Uri.parse('$kDbUrl/referralCodes/$code.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
-        if (lookupRes.statusCode == 200 && lookupRes.body.trim() != 'null') mapping = jsonDecode(lookupRes.body);
-      }
-      if (mapping is! Map || (mapping['uid'] ?? '').toString().isEmpty) {
-        throw Exception('Referral code valid nahi mila.');
-      }
-      final referrerUid = mapping['uid'].toString();
-      if (referrerUid == widget.uid) throw Exception('Self-referral allowed nahi hai.');
-      // Referral code index is the source of truth for applying a referral.
-      // Do not read the referrer's private profile here: user-level RTDB rules
-      // may deny that read even when the referral code mapping is valid.
-      // Self-referral protection remains immediately above this point.
-
-      final linkRes = await http.put(
-        Uri.parse('$kDbUrl/users/${widget.uid}/referredBy.json?auth=${widget.token}'),
-        body: jsonEncode(referrerUid),
-      ).timeout(const Duration(seconds: 20));
-      if (linkRes.statusCode < 200 || linkRes.statusCode >= 300) {
-        throw Exception('Referral apply save nahi hua (HTTP ${linkRes.statusCode}): ${linkRes.body}');
-      }
-
-      final historyRes = await http.put(
-        Uri.parse('$kDbUrl/referralCodes/$referrerUid/referrals/${widget.uid}.json?auth=${widget.token}'),
-        body: jsonEncode({
-          'uid': widget.uid,
-          'ign': (own['ign'] ?? _ign).toString(),
-          'status': 'PENDING',
-          'createdAt': DateTime.now().millisecondsSinceEpoch,
-          'reward': 5,
-        }),
-      ).timeout(const Duration(seconds: 20));
-      if (historyRes.statusCode < 200 || historyRes.statusCode >= 300) {
-        throw Exception('Referral link save ho gaya, lekin inviter history save nahi hui (HTTP ${historyRes.statusCode}). Support se contact karein.');
-      }
-      if (mounted) setState(() { _referredBy = referrerUid; _referralApplyC.clear(); });
-      _msg('Referral code successfully apply ho gaya. ₹5 bonus tab milega jab aapka ₹30+ deposit Admin approve karega.');
-    } catch (err) {
-      _msg(err.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _applyingReferral = false);
-    }
-  }
 
   Widget _referralCard() {
     final code = _referralCode.isEmpty ? 'Recovery pending' : _referralCode;
@@ -3126,14 +3057,6 @@ class _HomeScreenState extends State<HomeScreen> {
             if (isSuperAdmin) IconButton(tooltip: 'Edit admin referral code', onPressed: () => _changeReferralCodeForUser({'uid': widget.uid, 'email': widget.email, 'ign': _ign, 'referralCode': _referralCode}), icon: const Icon(Icons.edit, color: Color(0xFFFF9800))),
             IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
           ]),
-          if (_referredBy.isEmpty) ...[
-            Row(children: [
-              Expanded(child: TextField(controller: _referralApplyC, textCapitalization: TextCapitalization.characters, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]'))], maxLength: 12, decoration: const InputDecoration(counterText: '', labelText: 'Enter Referral Code', hintText: 'SKSAHID'))),
-              const SizedBox(width: 8),
-              ElevatedButton(onPressed: _applyingReferral ? null : _applyReferralCode, child: _applyingReferral ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Apply')),
-            ]),
-          ] else
-            const Row(children: [Icon(Icons.lock, size: 14, color: Color(0xFF00E676)), SizedBox(width: 5), Text('Referral Applied • Locked', style: TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 12))]),
           Row(children: [
             Expanded(child: Text('Successful referrals: $_referralCount', style: const TextStyle(color: Colors.white70, fontSize: 12))),
             Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
