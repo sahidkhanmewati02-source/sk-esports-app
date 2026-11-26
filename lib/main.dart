@@ -592,6 +592,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic> _rewards = {};
   int _referralCount = 0, _referralEarnings = 0;
   String _referralCode = '', _referredBy = '';
+  bool _applyingReferral = false;
+  final _referralApplyC = TextEditingController();
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
   String _promoImageUrl = '', _promoClickUrl = '';
@@ -622,7 +624,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _matchTicker?.cancel();
     _upiC.dispose(); _qrC.dispose(); _joinAdUrlController.dispose(); _roomAdUrlController.dispose(); _promoImageUrlController.dispose(); _promoClickUrlController.dispose(); _adsterraBannerCodeController.dispose();
-    _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose();
+    _chatC.dispose(); _aboutLinksC.dispose(); _rulesC.dispose(); _referralApplyC.dispose();
     super.dispose();
   }
 
@@ -1274,11 +1276,17 @@ class _HomeScreenState extends State<HomeScreen> {
         return Card(child: ListTile(title: Text('${d['ign']} • ₹${d['amt']}'), subtitle: Text('UTR: ${d['utr']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
             if (!isSuperAdmin) return _msg('Deposit approve karne ka access sirf Super Admin ko hai.');
-            Navigator.pop(ctx);
-            final u = _users.firstWhere((e) => e['uid'] == d['uid'], orElse: () => {});
-            if (u.isEmpty) return _msg('Player wallet record nahi mila.');
             final uid = d['uid'].toString();
-            final amt = _num(d['amt']);
+            final depositCheck = await http.get(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'));
+            if (depositCheck.statusCode != 200 || depositCheck.body.trim() == 'null') return _msg('Deposit record verify nahi hua; approval roki gayi.');
+            final liveDeposit = jsonDecode(depositCheck.body);
+            if (liveDeposit is! Map || (liveDeposit['status'] ?? '').toString() != 'PENDING') return _msg('Ye deposit pehle hi process ho chuka hai.');
+            final userCheck = await http.get(Uri.parse('$kDbUrl/users/$uid.json?auth=${widget.token}'));
+            if (userCheck.statusCode != 200 || userCheck.body.trim() == 'null') return _msg('Player wallet record nahi mila.');
+            final u = jsonDecode(userCheck.body) as Map;
+            final amt = _num(liveDeposit['amt']);
+            if (amt <= 0) return _msg('Deposit amount invalid hai.');
+            Navigator.pop(ctx);
             final txnId = DateTime.now().microsecondsSinceEpoch.toString();
             final now = DateTime.now();
             final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
@@ -1286,10 +1294,14 @@ class _HomeScreenState extends State<HomeScreen> {
               'users/$uid/wallet': _num(u['wallet']) + amt,
               'users/$uid/txns/$txnId': {'title': 'Wallet Deposit', 'sub': 'UTR: ${d['utr']} • $dt', 'amt': amt, 'status': 'APPROVED', 'time': dt},
               'deposits/${d['id']}/status': 'APPROVED',
+              'deposits/${d['id']}/approvedAt': DateTime.now().millisecondsSinceEpoch,
             };
             final referredBy = (u['referredBy'] ?? '').toString();
-            if (amt >= 20 && referredBy.isNotEmpty && referredBy != uid && u['referralPaid'] != true) {
-              final referrer = _users.firstWhere((p) => p['uid']?.toString() == referredBy, orElse: () => {});
+            if (amt >= 30 && referredBy.isNotEmpty && referredBy != uid && u['referralPaid'] != true) {
+              final referrerCheck = await http.get(Uri.parse('$kDbUrl/users/$referredBy.json?auth=${widget.token}'));
+              final referrer = referrerCheck.statusCode == 200 && referrerCheck.body.trim() != 'null'
+                  ? jsonDecode(referrerCheck.body) as Map
+                  : <String, dynamic>{};
               if (referrer.isNotEmpty) {
                 final refTxnId = DateTime.now().microsecondsSinceEpoch.toString() + 'r';
                 final refOldWallet = _num(referrer['wallet']);
@@ -3048,6 +3060,74 @@ class _HomeScreenState extends State<HomeScreen> {
       _msg(err.toString().replaceFirst('Exception: ', ''));
     }
   }
+  Future<void> _applyReferralCode() async {
+    if (_applyingReferral) return;
+    if (_referredBy.isNotEmpty) return _msg('Referral code pehle hi apply ho chuka hai.');
+    final code = _referralApplyC.text.trim().toUpperCase();
+    if (code.length < 4 || code.length > 12 || RegExp(r'[^A-Z0-9]').hasMatch(code)) {
+      return _msg('Valid referral code dalein (4–12 letters/numbers).');
+    }
+    setState(() => _applyingReferral = true);
+    try {
+      final ownRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
+      if (ownRes.statusCode != 200 || ownRes.body.trim() == 'null') {
+        throw Exception('Apna profile verify nahi ho paya. Dobara try karein.');
+      }
+      final own = jsonDecode(ownRes.body);
+      final already = (own is Map ? own['referredBy'] : null)?.toString() ?? '';
+      if (already.isNotEmpty) {
+        if (mounted) setState(() => _referredBy = already);
+        return _msg('Referral code pehle hi apply ho chuka hai; ab change nahi hoga.');
+      }
+
+      var lookupRes = await http.get(Uri.parse('$kDbUrl/referralLookup/$code.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
+      dynamic mapping;
+      if (lookupRes.statusCode == 200 && lookupRes.body.trim() != 'null') {
+        mapping = jsonDecode(lookupRes.body);
+      } else {
+        lookupRes = await http.get(Uri.parse('$kDbUrl/referralCodes/$code.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
+        if (lookupRes.statusCode == 200 && lookupRes.body.trim() != 'null') mapping = jsonDecode(lookupRes.body);
+      }
+      if (mapping is! Map || (mapping['uid'] ?? '').toString().isEmpty) {
+        throw Exception('Referral code valid nahi mila.');
+      }
+      final referrerUid = mapping['uid'].toString();
+      if (referrerUid == widget.uid) throw Exception('Self-referral allowed nahi hai.');
+      final referrerRes = await http.get(Uri.parse('$kDbUrl/users/$referrerUid.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
+      if (referrerRes.statusCode != 200 || referrerRes.body.trim() == 'null') {
+        throw Exception('Referral owner ka account verify nahi hua.');
+      }
+
+      final linkRes = await http.put(
+        Uri.parse('$kDbUrl/users/${widget.uid}/referredBy.json?auth=${widget.token}'),
+        body: jsonEncode(referrerUid),
+      ).timeout(const Duration(seconds: 20));
+      if (linkRes.statusCode < 200 || linkRes.statusCode >= 300) {
+        throw Exception('Referral apply save nahi hua (HTTP ${linkRes.statusCode}): ${linkRes.body}');
+      }
+
+      final historyRes = await http.put(
+        Uri.parse('$kDbUrl/referralCodes/$referrerUid/referrals/${widget.uid}.json?auth=${widget.token}'),
+        body: jsonEncode({
+          'uid': widget.uid,
+          'ign': (own['ign'] ?? _ign).toString(),
+          'status': 'PENDING',
+          'createdAt': DateTime.now().millisecondsSinceEpoch,
+          'reward': 5,
+        }),
+      ).timeout(const Duration(seconds: 20));
+      if (historyRes.statusCode < 200 || historyRes.statusCode >= 300) {
+        throw Exception('Referral link save ho gaya, lekin inviter history save nahi hui (HTTP ${historyRes.statusCode}). Support se contact karein.');
+      }
+      if (mounted) setState(() { _referredBy = referrerUid; _referralApplyC.clear(); });
+      _msg('Referral code successfully apply ho gaya. ₹5 bonus tab milega jab aapka ₹30+ deposit Admin approve karega.');
+    } catch (err) {
+      _msg(err.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _applyingReferral = false);
+    }
+  }
+
   Widget _referralCard() {
     final code = _referralCode.isEmpty ? 'Recovery pending' : _referralCode;
     return Card(
@@ -3056,18 +3136,26 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('REFER & EARN', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
           const SizedBox(height: 5),
-          const Text('Friend ke first ₹20+ approved deposit par aapko ₹5 Main Wallet mein milenge.', style: TextStyle(fontSize: 12)),
+          const Text('Friend ke minimum ₹30 approved deposit par aapko ₹5 Main Wallet mein milenge.', style: TextStyle(fontSize: 12)),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: SelectableText('Your Code: $code', style: const TextStyle(fontWeight: FontWeight.bold))),
             if (isSuperAdmin) IconButton(tooltip: 'Edit admin referral code', onPressed: () => _changeReferralCodeForUser({'uid': widget.uid, 'email': widget.email, 'ign': _ign, 'referralCode': _referralCode}), icon: const Icon(Icons.edit, color: Color(0xFFFF9800))),
             IconButton(tooltip: 'Copy referral code', onPressed: () async { await Clipboard.setData(ClipboardData(text: code)); _msg('Referral code copied!'); }, icon: const Icon(Icons.copy, color: Color(0xFFFF9800))),
           ]),
+          if (_referredBy.isEmpty) ...[
+            Row(children: [
+              Expanded(child: TextField(controller: _referralApplyC, textCapitalization: TextCapitalization.characters, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]'))], maxLength: 12, decoration: const InputDecoration(counterText: '', labelText: 'Enter Referral Code', hintText: 'SKSAHID'))),
+              const SizedBox(width: 8),
+              ElevatedButton(onPressed: _applyingReferral ? null : _applyReferralCode, child: _applyingReferral ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Apply')),
+            ]),
+          ] else
+            const Row(children: [Icon(Icons.lock, size: 14, color: Color(0xFF00E676)), SizedBox(width: 5), Text('Referral Applied • Locked', style: TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 12))]),
           Row(children: [
             Expanded(child: Text('Successful referrals: $_referralCount', style: const TextStyle(color: Colors.white70, fontSize: 12))),
             Text('Earned: ₹$_referralEarnings', style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
           ]),
-          if (_referredBy.isNotEmpty) const Text('Referral linked to your account. Your inviter reward is processed after your first ₹20+ deposit is approved.', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          if (_referredBy.isNotEmpty) const Text('Referral linked to your account. Your inviter reward is processed after your first ₹30+ deposit is approved.', style: TextStyle(fontSize: 10, color: Colors.grey)),
           const Divider(height: 18),
           const Text('REFERRAL HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))),
           const SizedBox(height: 6),
@@ -3083,7 +3171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(success ? Icons.check_circle : Icons.hourglass_top, color: success ? const Color(0xFF00E676) : Colors.orange),
                 title: Text((entry['ign'] ?? 'Player').toString()),
-                subtitle: Text('$date • ${success ? 'Deposit approved' : 'Waiting for first ₹20+ approved deposit'}'),
+                subtitle: Text('$date • ${success ? 'Deposit approved' : 'Waiting for first ₹30+ approved deposit'}'),
                 trailing: Text(success ? 'Completed' : 'Pending', style: TextStyle(fontWeight: FontWeight.bold, color: success ? const Color(0xFF00E676) : Colors.orange, fontSize: 11)),
               );
             }),
