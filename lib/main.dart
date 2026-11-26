@@ -1102,7 +1102,7 @@ class _HomeScreenState extends State<HomeScreen> {
         credits += amount;
         if (stamp > 0) {
           final dt = DateTime.fromMillisecondsSinceEpoch(stamp);
-          final key = '\${dt.year}-\${dt.month.toString().padLeft(2,'0')}';
+          final key = '${dt.year}-${dt.month.toString().padLeft(2,'0')}';
           monthly[key] = (monthly[key] ?? 0) + amount;
           if (dt.year == now.year && dt.month == now.month) monthCredits += amount;
         }
@@ -1113,7 +1113,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final parts = key.split('-');
       final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]));
       const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      return '\${names[dt.month-1]} \${dt.year}';
+      return '${names[dt.month-1]} ${dt.year}';
     }
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -1143,10 +1143,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ]),
         if (monthKeys.isNotEmpty) ...[
           const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 14,bottom: 5), child: Text('MONTH-WISE EARNINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
-          SizedBox(height: 64, child: ListView(scrollDirection: Axis.horizontal, children: monthKeys.map((k)=>Container(width: 126, margin: const EdgeInsets.only(right: 8), child: Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(mainAxisAlignment: MainAxisAlignment.center,crossAxisAlignment: CrossAxisAlignment.start,children:[Text(monthLabel(k),style: const TextStyle(fontSize: 12,color: Colors.grey)),const SizedBox(height: 4),Text('₹\${monthly[k]}',style: const TextStyle(fontWeight: FontWeight.bold,color: Color(0xFF00E676),fontSize: 17))]))))).toList())),
+          SizedBox(height: 64, child: ListView(scrollDirection: Axis.horizontal, children: monthKeys.map((k)=>Container(width: 126, margin: const EdgeInsets.only(right: 8), child: Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(mainAxisAlignment: MainAxisAlignment.center,crossAxisAlignment: CrossAxisAlignment.start,children:[Text(monthLabel(k),style: const TextStyle(fontSize: 12,color: Colors.grey)),const SizedBox(height: 4),Text('₹${monthly[k]}',style: const TextStyle(fontWeight: FontWeight.bold,color: Color(0xFF00E676),fontSize: 17))]))))).toList())),
         ],
         const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 12,bottom: 6), child: Text('ALL TRANSACTION HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
-        Expanded(child: _txns.isEmpty ? const Center(child: Text('Abhi koi wallet transaction nahi hai.')) : ListView.builder(itemCount: _txns.length,itemBuilder: (_,i)=>ListTile(leading: const Icon(Icons.receipt_long,color: Color(0xFFFF9800)),title: Text('\${_txns[i]['title'] ?? 'Wallet Transaction'}'),subtitle: Text('\${_txns[i]['sub'] ?? ''} • \${_txns[i]['status'] ?? ''}\\n\${_formatHistoryDateTime(_txns[i])}'),trailing: Text('₹\${_txns[i]['amt'] ?? 0}')))),
+        Expanded(child: _txns.isEmpty ? const Center(child: Text('Abhi koi wallet transaction nahi hai.')) : ListView.builder(itemCount: _txns.length,itemBuilder: (_,i)=>ListTile(leading: const Icon(Icons.receipt_long,color: Color(0xFFFF9800)),title: Text('${_txns[i]['title'] ?? 'Wallet Transaction'}'),subtitle: Text('${_txns[i]['sub'] ?? ''} • ${_txns[i]['status'] ?? ''}\\n${_formatHistoryDateTime(_txns[i])}'),trailing: Text('₹${_txns[i]['amt'] ?? 0}')))),
       ]),
     );
   }
