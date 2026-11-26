@@ -3076,10 +3076,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       final referrerUid = mapping['uid'].toString();
       if (referrerUid == widget.uid) throw Exception('Self-referral allowed nahi hai.');
-      final referrerRes = await http.get(Uri.parse('$kDbUrl/users/$referrerUid.json?auth=${widget.token}')).timeout(const Duration(seconds: 20));
-      if (referrerRes.statusCode != 200 || referrerRes.body.trim() == 'null') {
-        throw Exception('Referral owner ka account verify nahi hua.');
-      }
+      // Referral code index is the source of truth for applying a referral.
+      // Do not read the referrer's private profile here: user-level RTDB rules
+      // may deny that read even when the referral code mapping is valid.
+      // Self-referral protection remains immediately above this point.
 
       final linkRes = await http.put(
         Uri.parse('$kDbUrl/users/${widget.uid}/referredBy.json?auth=${widget.token}'),
