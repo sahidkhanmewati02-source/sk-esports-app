@@ -2182,8 +2182,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 }).toList(),
               )),
-              if (enabled && selected.isEmpty)
-                const Text('Selection enabled hai: kam se kam 1 Admin select karein.', style: TextStyle(color: Colors.orange, fontSize: 12)),
             ]),
           ),
           actions: [
