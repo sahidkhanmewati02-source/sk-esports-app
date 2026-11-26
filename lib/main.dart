@@ -2211,6 +2211,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _join(Map m) async {
+    // Always read the latest match settings from Firebase before showing Join.
+    // The match card can contain stale data if Super Admin changed voting settings
+    // after this player's match list was loaded.
+    final matchId = (m['id'] ?? '').toString();
+    if (matchId.isEmpty) return _msg('Match ID nahi mila. Refresh karke dobara try karein.');
+    try {
+      final latest = await http.get(Uri.parse('$kDbUrl/matches/$matchId.json?auth=${widget.token}')).timeout(const Duration(seconds: 15));
+      if (latest.statusCode != 200 || latest.body.trim() == 'null') {
+        return _msg('Latest match settings load nahi hui (HTTP ${latest.statusCode}). Refresh karke try karein.');
+      }
+      final latestData = jsonDecode(latest.body);
+      if (latestData is! Map) return _msg('Match settings invalid hain. Super Admin ko inform karein.');
+      m.addAll(Map<String, dynamic>.from(latestData));
+      m['id'] = matchId;
+    } catch (e) {
+      return _msg('Match settings load nahi hui: ${e.toString().replaceAll('Exception: ', '')}');
+    }
     final adminOptions = m['votingAdmins'] is List
         ? List<Map<String,dynamic>>.from((m['votingAdmins'] as List).whereType<Map>().map((x) => Map<String,dynamic>.from(x)).where((x) => (x['uid'] ?? '').toString().isNotEmpty))
         : <Map<String,dynamic>>[];
@@ -2312,6 +2329,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     'joinedAt': now.millisecondsSinceEpoch,
                     'feePaid': payable,
                     'baseFee': baseTotal,
+                    // Legacy Firebase rules compatibility only; Bonus Wallet is disabled.
+                    'bonusDiscount': 0,
                     if (adminSelectionEnabled) 'selectedAdminUid': selectedAdminUid,
                     if (adminSelectionEnabled) 'selectedAdminName': (selectedAdmin['name'] ?? 'Admin').toString(),
                   };
