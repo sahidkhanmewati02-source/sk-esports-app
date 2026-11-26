@@ -273,6 +273,32 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  Future<void> _sendVerificationEmail(String idToken) async {
+    final res = await http.post(
+      Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=$kApiKey'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'requestType': 'VERIFY_EMAIL', 'idToken': idToken}),
+    );
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['error']?['message'] ?? 'Verification email send nahi hua.');
+    }
+  }
+
+  Future<bool> _isEmailVerified(String idToken) async {
+    final res = await http.post(
+      Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=$kApiKey'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'idToken': idToken}),
+    );
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['error']?['message'] ?? 'Email verification status check nahi hua.');
+    }
+    final users = data['users'];
+    return users is List && users.isNotEmpty && users.first['emailVerified'] == true;
+  }
+
   Future _submit() async {
     final e = _email.text.trim(), p = _pass.text.trim();
     if (!e.contains('@') || !RegExp(r'^.{6,}$').hasMatch(p)) {
@@ -294,6 +320,13 @@ class _AuthScreenState extends State<AuthScreen> {
         throw Exception(data['error']?['message'] ?? 'Auth Failed');
       }
       final String uid = data['localId'], token = data['idToken'];
+      if (_isLogin) {
+        final verified = await _isEmailVerified(token);
+        if (!verified) {
+          await _sendVerificationEmail(token);
+          throw Exception('Aapka Gmail abhi verify nahi hua. Inbox/Spam mein verification link check karein; naya link bhej diya hai. Link verify karke phir login karein.');
+        }
+      }
       String? referredBy;
       if (!_isLogin && _referral.text.trim().isNotEmpty) {
         final code = _referral.text.trim().toUpperCase();
@@ -342,6 +375,15 @@ class _AuthScreenState extends State<AuthScreen> {
             _msg('Account ban gaya, lekin referral pending record save nahi hua.');
           }
         }
+        // Registration profile keeps the same Firebase UID. Require Gmail verification
+        // before saving a persistent app session or entering the tournament app.
+        await _sendVerificationEmail(token);
+        await sp.remove('rt');
+        await sp.remove('email');
+        if (!mounted) return;
+        setState(() => _isLogin = true);
+        _msg('Registration ho gaya! Gmail inbox/Spam mein verification link bheja hai. Link verify karke isi Email aur Password se login karein.');
+        return;
       }
       if (!mounted) return;
       Navigator.pushReplacement(
