@@ -1242,11 +1242,36 @@ class _HomeScreenState extends State<HomeScreen> {
               widgets.add(Card(child: Column(children: [
                 ListTile(title: Text(a['title'].toString()), subtitle: Text('Collection ₹' + a['collection'].toString() + ' • Net ₹' + profit.toString())),
                 ...adminWidgets,
-                Wrap(children: [
-                  TextButton(onPressed: () { Navigator.pop(ctx); _showAdminSelectionLeaderboard(m); }, child: const Text('Admin Picks')),
-                  TextButton(onPressed: () { Navigator.pop(ctx); _addMatchExpense(m); }, child: const Text('Add Expense')),
-                  TextButton(onPressed: () { Navigator.pop(ctx); _showMatchHisaab(m); }, child: const Text('Hisaab')),
-                ]),
+                if (isSuperAdmin)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _configureMatchVotingAdmins(m),
+                        icon: const Icon(Icons.how_to_vote),
+                        label: Text(m['adminSelectionEnabled'] == true ? 'MANAGE VOTING ADMINS' : 'ADD ADMINS FOR THIS MATCH'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF9800),
+                          foregroundColor: Colors.black,
+                          minimumSize: const Size.fromHeight(46),
+                        ),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showAdminSelectionLeaderboard(m); }, icon: const Icon(Icons.poll, size: 16), label: const Text('Admin Picks')),
+                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _addMatchExpense(m); }, icon: const Icon(Icons.add, size: 16), label: const Text('Add Expense')),
+                      OutlinedButton.icon(onPressed: () { Navigator.pop(ctx); _showMatchHisaab(m); }, icon: const Icon(Icons.receipt_long, size: 16), label: const Text('Hisaab')),
+                    ],
+                  ),
+                ),
               ])));
             }
             page = ListView(children: widgets);
