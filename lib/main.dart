@@ -1198,7 +1198,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _showFinanceDashboard() async {
     if (!isSuperAdmin || !mounted) return;
     var tab = 0;
-    var loading = true;
+    var loading = false;
     String? loadError;
     StateSetter? refreshFinance;
     final accounts = <Map>[];
@@ -1289,7 +1289,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 12),
                     Text('Finance load failed: $loadError', textAlign: TextAlign.center),
                     const SizedBox(height: 12),
-                    ElevatedButton(onPressed: () => _showFinanceDashboard(), child: const Text('Retry')),
+                    ElevatedButton(onPressed: loading ? null : reloadFinance, child: const Text('Retry')),
                   ]),
                 ));
               }
