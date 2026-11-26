@@ -474,7 +474,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isCoAdmin = false;
   bool get isAdmin => isSuperAdmin || _isCoAdmin;
   int _tab = 0, _wallet = 0;
-  Map<String, dynamic> _rewards = {};
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
   String _promoImageUrl = '', _promoClickUrl = '';
@@ -680,21 +679,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _ign = d['ign'] ?? 'SK_Player';
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
-        _rewards = d['rewards'] is Map ? Map<String, dynamic>.from(d['rewards']) : <String, dynamic>{};
-        final rewardKeys = ['bonusWallet','discountMatchId','discountAmount','discountsUsed','updatedAt'];
-        if (_rewards.isEmpty) {
-          await _ensureRewards();
-        } else if (rewardKeys.any((key) => !_rewards.containsKey(key)) ||
-            _rewards.keys.any((key) => !rewardKeys.contains(key))) {
-          final migrated = <String, dynamic>{
-            'bonusWallet': _num(_rewards['bonusWallet']),
-            'discountMatchId': (_rewards['discountMatchId'] ?? '').toString(),
-            'discountAmount': _num(_rewards['discountAmount']),
-            'discountsUsed': _rewards['discountsUsed'] is Map ? _rewards['discountsUsed'] : <String, dynamic>{},
-            'updatedAt': {'.sv': 'timestamp'},
-          };
-          await _putRewards(migrated);
-        }
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (d['txns'] is Map) {
           _txns = (d['txns'] as Map).entries
@@ -2378,41 +2362,6 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final c in nameControllers) { c.dispose(); }
       for (final c in idControllers) { c.dispose(); }
     });
-  }
-
-  Future<void> _ensureRewards() async {
-    final initial = <String, dynamic>{
-      'bonusWallet': 0,
-      'discountMatchId': '',
-      'discountAmount': 0,
-      'discountsUsed': <String, dynamic>{},
-      'updatedAt': {'.sv': 'timestamp'},
-    };
-    final res = await http.put(
-      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
-      body: jsonEncode(initial),
-    );
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      try {
-        final saved = jsonDecode(res.body);
-        if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
-      } catch (_) { _rewards = initial; }
-    }
-  }
-
-  Future<bool> _putRewards(Map<String, dynamic> value) async {
-    final res = await http.put(
-      Uri.parse('$kDbUrl/users/${widget.uid}/rewards.json?auth=${widget.token}'),
-      body: jsonEncode(value),
-    );
-    if (res.statusCode < 200 || res.statusCode >= 300) return false;
-    try {
-      final saved = jsonDecode(res.body);
-      if (saved is Map) _rewards = Map<String, dynamic>.from(saved);
-      else _rewards = value;
-    } catch (_) { _rewards = value; }
-    if (mounted) setState(() {});
-    return true;
   }
 
   void _deposit() {
