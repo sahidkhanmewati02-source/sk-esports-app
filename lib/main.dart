@@ -1084,6 +1084,83 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
+
+  Widget _walletPage() {
+    final creditedStatuses = {'CREDITED','APPROVED','SUCCESS','COMPLETED'};
+    final debitStatuses = {'DEBITED','WITHDRAWN','WITHDRAWAL'};
+    int credits = 0, debits = 0, monthCredits = 0;
+    final now = DateTime.now();
+    final monthly = <String, int>{};
+    for (final t in _txns) {
+      final amount = _num(t['amt']).round();
+      final status = (t['status'] ?? '').toString().toUpperCase();
+      final title = (t['title'] ?? '').toString().toLowerCase();
+      final isCredit = creditedStatuses.contains(status) || title.contains('reward') || title.contains('prize') || title.contains('referral') || title.contains('win') || title.contains('share') || title.contains('credit');
+      final isDebit = debitStatuses.contains(status) || title.contains('entry fee') || title.contains('withdraw');
+      final stamp = _historyTimestamp(t);
+      if (isCredit) {
+        credits += amount;
+        if (stamp > 0) {
+          final dt = DateTime.fromMillisecondsSinceEpoch(stamp);
+          final key = '\${dt.year}-\${dt.month.toString().padLeft(2,'0')}';
+          monthly[key] = (monthly[key] ?? 0) + amount;
+          if (dt.year == now.year && dt.month == now.month) monthCredits += amount;
+        }
+      } else if (isDebit) { debits += amount; }
+    }
+    final monthKeys = monthly.keys.toList()..sort((a,b)=>b.compareTo(a));
+    String monthLabel(String key) {
+      final parts = key.split('-');
+      final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]));
+      const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '\${names[dt.month-1]} \${dt.year}';
+    }
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(children: [
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          const Text('AVAILABLE WALLET BALANCE', style: TextStyle(color: Colors.grey, fontSize: 11)),
+          Text('₹$_wallet', style: const TextStyle(fontSize: 27, fontWeight: FontWeight.bold, color: Color(0xFF00E676))),
+        ]))),
+        Row(children: [
+          Expanded(child: ElevatedButton(onPressed: _deposit, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)), child: const Text('Add Money', style: TextStyle(color: Colors.black)))),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
+          const SizedBox(width: 8),
+          IconButton(tooltip: 'UPI / QR', onPressed: isSuperAdmin ? _showPaymentSettingsDialog : _deposit, icon: const Icon(Icons.qr_code_2, color: Color(0xFFFF9800))),
+        ]),
+        if (isSuperAdmin) Padding(padding: const EdgeInsets.only(bottom: 8), child: SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: _showFinanceDashboard, icon: const Icon(Icons.analytics), label: const Text('Open SK eSports Finance Dashboard')))),
+        Row(children: [
+          Expanded(child: _walletMetric('All-time Credits', '₹$credits', Icons.trending_up, const Color(0xFF00E676))),
+          const SizedBox(width: 8),
+          Expanded(child: _walletMetric('This Month', '₹$monthCredits', Icons.calendar_month, const Color(0xFFFF9800))),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: _walletMetric('Total Debits', '₹$debits', Icons.trending_down, Colors.redAccent)),
+          const SizedBox(width: 8),
+          Expanded(child: _walletMetric('Transactions', _txns.length.toString(), Icons.receipt_long, Colors.lightBlueAccent)),
+        ]),
+        if (monthKeys.isNotEmpty) ...[
+          const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 14,bottom: 5), child: Text('MONTH-WISE EARNINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
+          SizedBox(height: 64, child: ListView(scrollDirection: Axis.horizontal, children: monthKeys.map((k)=>Container(width: 126, margin: const EdgeInsets.only(right: 8), child: Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(mainAxisAlignment: MainAxisAlignment.center,crossAxisAlignment: CrossAxisAlignment.start,children:[Text(monthLabel(k),style: const TextStyle(fontSize: 12,color: Colors.grey)),const SizedBox(height: 4),Text('₹\${monthly[k]}',style: const TextStyle(fontWeight: FontWeight.bold,color: Color(0xFF00E676),fontSize: 17))]))))).toList())),
+        ],
+        const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 12,bottom: 6), child: Text('ALL TRANSACTION HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
+        Expanded(child: _txns.isEmpty ? const Center(child: Text('Abhi koi wallet transaction nahi hai.')) : ListView.builder(itemCount: _txns.length,itemBuilder: (_,i)=>ListTile(leading: const Icon(Icons.receipt_long,color: Color(0xFFFF9800)),title: Text('\${_txns[i]['title'] ?? 'Wallet Transaction'}'),subtitle: Text('\${_txns[i]['sub'] ?? ''} • \${_txns[i]['status'] ?? ''}\\n\${_formatHistoryDateTime(_txns[i])}'),trailing: Text('₹\${_txns[i]['amt'] ?? 0}')))),
+      ]),
+    );
+  }
+
+  Widget _walletMetric(String title, String value, IconData icon, Color color) {
+    return Card(child: Padding(padding: const EdgeInsets.all(10), child: Row(children: [
+      Icon(icon,color:color,size:20), const SizedBox(width:8),
+      Expanded(child: Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text(title,style:const TextStyle(fontSize:10,color:Colors.grey),maxLines:1,overflow:TextOverflow.ellipsis),
+        Text(value,style:TextStyle(fontSize:17,fontWeight:FontWeight.bold,color:color)),
+      ])),
+    ])));
+  }
+
   Future<void> _showFinanceDashboard() async {
     if (!isSuperAdmin) return;
     var tab = 0;
@@ -2819,65 +2896,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
       ]),
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          Card(
-            child: ListTile(
-              title: const Text('Wallet Balance'),
-              trailing: Text(
-                '₹$_wallet',
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00E676)),
-              ),
-            ),
-          ),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676), padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 12)),
-                  onPressed: _deposit,
-                  child: const Text('Add Money', maxLines: 1, style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _withdraw,
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 12)),
-                  child: const Text('Withdraw', maxLines: 1, style: TextStyle(fontSize: 12)),
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: isSuperAdmin ? _showPaymentSettingsDialog : _deposit,
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8), foregroundColor: const Color(0xFFFF9800), side: const BorderSide(color: Color(0xFFFF9800))),
-                  child: const Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.qr_code_2, size: 17),
-                    Text('UPI / QR', maxLines: 1, style: TextStyle(fontSize: 9)),
-                  ]),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          const Align(alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.only(top: 12, bottom: 6), child: Text('TRANSACTION HISTORY', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800))))),
-          Expanded(
-            child: _txns.isEmpty
-                ? const Center(child: Text('Abhi koi wallet transaction nahi hai.'))
-                : ListView.builder(
-                    itemCount: _txns.length,
-                    itemBuilder: (_, i) => ListTile(
-                      leading: const Icon(Icons.receipt_long, color: Color(0xFFFF9800)),
-                      title: Text('${_txns[i]['title'] ?? 'Wallet Transaction'}'),
-                      subtitle: Text('${_txns[i]['sub'] ?? ''} • ${_txns[i]['status'] ?? ''}\n${_formatHistoryDateTime(_txns[i])}'),
-                      trailing: Text('₹${_txns[i]['amt'] ?? 0}'),
-                    ),
-                  ),
-          ),
-        ]),
-      ),
+      _walletPage(),
       ListView(padding: const EdgeInsets.all(16), children: [
         Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
 
@@ -2952,7 +2971,6 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 12),
           const SizedBox(height: 12),
           if (isSuperAdmin) ...[
-          ElevatedButton.icon(onPressed: _showFinanceDashboard, icon: const Icon(Icons.analytics), label: const Text('SK eSports Finance')),
           TextButton.icon(
             onPressed: _showHistory,
             icon: const Icon(Icons.history, size: 18, color: Color(0xFFFF9800)),
@@ -2979,7 +2997,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute<void>(builder: (_) => Scaffold(
                     appBar: AppBar(
-                      title: const Text('My Wallet'),
+                      title: const Text('My Wallet & Earnings'),
                       backgroundColor: const Color(0xFF161B22),
                     ),
                     body: pages[1],
@@ -2987,7 +3005,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                  child: Text('₹$_wallet', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 17)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.account_balance_wallet, color: Color(0xFF00E676), size: 18), const SizedBox(width: 4), Text('₹$_wallet', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 17))]),
                 ),
               ),
             ),
