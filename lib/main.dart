@@ -792,6 +792,7 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
         _users = usrs;
+        if (isSuperAdmin) await _refreshAdminDirectory();
       } else {
         final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
         final chats = <Map>[];
@@ -991,6 +992,66 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+
+  Future<List<Map<String, dynamic>>> _loadRegisteredAdmins() async {
+    final r = await http.get(Uri.parse('$kDbUrl/config/adminDirectory.json?auth=${widget.token}'));
+    if (r.statusCode != 200 || r.body == 'null') throw Exception('Admin list unavailable. Super Admin app refresh karein.');
+    final raw = jsonDecode(r.body);
+    if (raw is! List) throw Exception('Admin directory invalid.');
+    final list = raw.whereType<Map>().map((e) => Map<String,dynamic>.from(e)).where((e) => (e['uid'] ?? '').toString().isNotEmpty && (e['isSuperAdmin'] == true || e['role'] == 'coadmin')).toList();
+    if (list.isEmpty) throw Exception('Koi Admin/Co-Admin registered nahi hai.');
+    return list;
+  }
+
+  Future<void> _refreshAdminDirectory() async {
+    if (!isSuperAdmin) return;
+    final list = <Map<String,dynamic>>[], seen = <String>{};
+    for (final u in _users) {
+      final uid = (u['uid'] ?? '').toString(), email = (u['email'] ?? '').toString();
+      final sup = email.toLowerCase() == kAdmin.toLowerCase() || uid == widget.uid;
+      if (uid.isEmpty || (!sup && u['role'] != 'coadmin') || !seen.add(uid)) continue;
+      list.add({'uid':uid,'name':(u['ign'] ?? u['name'] ?? (sup ? 'SK eSports' : 'Admin')).toString(),'email':email,'role':sup ? 'superadmin' : 'coadmin','isSuperAdmin':sup});
+    }
+    if (!seen.contains(widget.uid)) list.insert(0, {'uid':widget.uid,'name':_ign,'email':widget.email,'role':'superadmin','isSuperAdmin':true});
+    final r = await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'adminDirectory':list}));
+    if (r.statusCode < 200 || r.statusCode >= 300) _msg('Admin directory update failed.');
+  }
+
+  List<Map<String,dynamic>> _adminLeaderboardRows(Map match) {
+    final players = match['players'] is Map ? match['players'] as Map : <dynamic,dynamic>{};
+    final groups = <String,Map<String,dynamic>>{}, ids = <String,int>{};
+    for (final e in players.entries) {
+      final p = e.value is Map ? Map<String,dynamic>.from(e.value as Map) : <String,dynamic>{};
+      final members = p['members'] is List ? p['members'] as List : [p];
+      for (final x in members) { if (x is Map) { final id=(x['bgmiId'] ?? '').toString(); if(id.isNotEmpty) ids[id]=(ids[id] ?? 0)+1; } }
+      final aid=(p['selectedAdminUid'] ?? '').toString(); if(aid.isEmpty) continue;
+      final row=groups.putIfAbsent(aid,()=>{'uid':aid,'name':p['selectedAdminName'] ?? 'Admin','count':0,'players':<Map<String,dynamic>>[]});
+      row['count']=_num(row['count'])+1;
+      (row['players'] as List).add({'ign':p['ign'] ?? 'Player','slot':p['slotNumber'] ?? 0,'members':members});
+    }
+    for(final row in groups.values) { for(final p in row['players'] as List) {
+      p['duplicateIds']=(p['members'] as List).whereType<Map>().map((x)=>(x['bgmiId'] ?? '').toString()).where((id)=>id.isNotEmpty && (ids[id] ?? 0)>1).toSet().toList();
+    }}
+    return groups.values.toList()..sort((a,b)=>_num(b['count']).compareTo(_num(a['count'])));
+  }
+
+  void _showAdminSelectionLeaderboard(Map match) {
+    if(!isAdmin) return;
+    final rows=_adminLeaderboardRows(match);
+    showDialog(context:context,builder:(ctx)=>AlertDialog(
+      title:Text('Admin Selection • '+(match['title'] ?? 'Match').toString()),
+      content:SizedBox(width:double.maxFinite,height:430,child:rows.isEmpty?const Center(child:Text('No admin selection data yet.')):ListView(children:[
+        Text('Total slots: '+_matchPlayerCount(match).toString()),
+        ...rows.map((r)=>Card(child:Padding(padding:const EdgeInsets.all(9),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Row(children:[Expanded(child:Text(r['name'].toString(),style:const TextStyle(fontWeight:FontWeight.bold))),Text(r['count'].toString()+' Players',style:const TextStyle(color:Color(0xFF00E676)))]),
+          const Divider(),
+          ...(r['players'] as List).map((p)=>Text('Slot #'+p['slot'].toString()+' • '+p['ign'].toString()+'\n'+(p['members'] as List).whereType<Map>().map((x)=>x['ign'].toString()+' • '+x['bgmiId'].toString()+((p['duplicateIds'] as List).contains((x['bgmiId'] ?? '').toString())?' ⚠ DUPLICATE ID':'')).join('\n'),style:const TextStyle(fontSize:11))),
+        ])))),
+      ])),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Close'))],
+    ));
   }
 
   Future _saveTxn(String uid, int bal, String title, String sub, int amt, String status) async {
@@ -1782,7 +1843,10 @@ class _HomeScreenState extends State<HomeScreen> {
     ).then((_) => searchC.dispose());
   }
 
-  void _join(Map m) {
+  Future<void> _join(Map m) async {
+    List<Map<String,dynamic>> adminOptions;
+    try { adminOptions = await _loadRegisteredAdmins(); } catch(e) { _msg(e.toString().replaceAll('Exception: ','')); return; }
+    String selectedAdminUid = '';
     final teamSize = _teamSize(m);
     final mode = (m['mode'] ?? 'SOLO').toString().toUpperCase();
     final matchId = m['id'].toString();
@@ -1814,6 +1878,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   const Text('Rule: Har teammate ki BGMI Level 30+ ID required.', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
                   const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: selectedAdminUid.isEmpty ? null : selectedAdminUid,
+                    decoration: const InputDecoration(labelText: 'Select Admin (Required)', border: OutlineInputBorder()),
+                    items: adminOptions.map((x) => DropdownMenuItem<String>(value:x['uid'].toString(),child:Text((x['name'] ?? 'Admin').toString()+(x['isSuperAdmin']==true?' • Super Admin':' • Co-Admin'),overflow:TextOverflow.ellipsis))).toList(),
+                    onChanged:(v)=>setDialogState(()=>selectedAdminUid=v ?? ''),
+                  ),
+                  const SizedBox(height:10),
                   for (var i = 0; i < teamSize; i++) ...[
                     Align(alignment: Alignment.centerLeft, child: Text(i == 0 ? 'Team Leader' : 'Teammate ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
                     const SizedBox(height: 5),
@@ -1850,6 +1921,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
                 onPressed: () async {
+                  if(selectedAdminUid.isEmpty) return _msg('Join confirm se pehle Admin select karein.');
+                  final selectedAdmin=adminOptions.firstWhere((x)=>x['uid'].toString()==selectedAdminUid);
                   final members = <Map<String, dynamic>>[];
                   for (var i = 0; i < teamSize; i++) {
                     final ign = nameControllers[i].text.trim();
@@ -1886,6 +1959,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     'feePaid': payable,
                     'baseFee': baseTotal,
                     'bonusDiscount': discount,
+                    'selectedAdminUid': selectedAdminUid,
+                    'selectedAdminName': (selectedAdmin['name'] ?? 'Admin').toString(),
                   };
                   final txn = {
                     'title': 'Joined: ${m['title']}',
@@ -2517,6 +2592,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
                           child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
                         ),
+                        const SizedBox(width: 6),
+                        OutlinedButton(onPressed: () => _showAdminSelectionLeaderboard(m), child: const Text('Admin Picks', style: TextStyle(fontSize: 11))),
                         const SizedBox(width: 6),
                         if (!_isMatchCompleted(m)) OutlinedButton(
                           onPressed: () => _markMatchCompleted(m),
