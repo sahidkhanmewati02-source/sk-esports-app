@@ -1213,52 +1213,95 @@ class _HomeScreenState extends State<HomeScreen> {
       withdrawals.clear();
       refreshFinance?.call(() {});
       try {
-        // Refresh the app's live matches, wallet transactions and match hisaab,
-        // then rebuild the Finance screen from the newly synced data.
-        await _sync();
-        for (final m in _matches) {
-          final id = m['id'].toString();
-          final cached = _matchAccounts.firstWhere(
-            (x) => (x['id'] ?? '').toString() == id,
-            orElse: () => <String,dynamic>{},
-          );
-          final h = Map<String,dynamic>.from(cached);
-          accounts.add({
-            'id': id,
-            'title': m['title'] ?? h['title'] ?? 'Match',
-            'match': m,
-            ...h,
-            'collection': _rosterCollection(m, h),
-          });
-        }
-        for (final cached in _matchAccounts) {
-          final id = (cached['id'] ?? '').toString();
-          if (id.isEmpty || accounts.any((a) => a['id'].toString() == id)) continue;
-          accounts.add({
-            ...Map<String,dynamic>.from(cached),
-            'match': <String,dynamic>{'id':id,'title':cached['title'] ?? 'Match','players':<String,dynamic>{}},
-          });
-        }
+        // Finance uses its own bounded, read-only requests. Do not call _sync()
+        // here because that also reloads the entire admin home and can leave
+        // this pushed route waiting on unrelated Firebase operations.
         final responses = await Future.wait<http.Response>([
+          http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
+          http.get(Uri.parse('$kDbUrl/match_hisaab.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
           http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
           http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
+          http.get(Uri.parse('$kDbUrl/users/${widget.uid}/txns.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
         ]);
-        final d = responses[0], w = responses[1];
-        if (d.statusCode != 200) throw Exception('Deposits read failed HTTP ${d.statusCode}');
-        if (w.statusCode != 200) throw Exception('Withdrawals read failed HTTP ${w.statusCode}');
-        if (d.body != 'null') {
-          final data = jsonDecode(d.body);
-          if (data is Map) data.forEach((k, v) { if (v is Map) deposits.add({'id': k, ...v}); });
+        for (var i = 0; i < responses.length; i++) {
+          if (responses[i].statusCode != 200) {
+            throw Exception('Finance data read failed (HTTP ${responses[i].statusCode}, request ${i + 1})');
+          }
         }
-        if (w.body != 'null') {
-          final data = jsonDecode(w.body);
-          if (data is Map) data.forEach((k, v) { if (v is Map) withdrawals.add({'id': k, ...v}); });
+        final liveMatches = <Map<String,dynamic>>[];
+        if (responses[0].body.trim() != 'null') {
+          final rawMatches = jsonDecode(responses[0].body);
+          if (rawMatches is Map) {
+            rawMatches.forEach((id, value) {
+              if (value is Map) liveMatches.add({...Map<String,dynamic>.from(value), 'id':id.toString()});
+            });
+          }
+        }
+        final rawHisaab = responses[1].body.trim() == 'null'
+            ? <String,dynamic>{}
+            : (jsonDecode(responses[1].body) as Map).map((k,v) => MapEntry(k.toString(),v));
+        for (final m in liveMatches) {
+          final id = m['id'].toString();
+          final saved = rawHisaab[id] is Map
+              ? Map<String,dynamic>.from(rawHisaab[id] as Map)
+              : <String,dynamic>{};
+          final h = <String,dynamic>{
+            'id':id,
+            'title':saved['title'] ?? m['title'] ?? 'Match',
+            'collection':_rosterCollection(m, saved),
+            'prizeSent':saved['prizeSent'] ?? 0,
+            'expenses':saved['expenses'] ?? <String,dynamic>{},
+            'adminPayments':saved['adminPayments'] ?? <String,dynamic>{},
+            ...saved,
+          };
+          accounts.add({
+            'id':id,
+            'title':m['title'] ?? h['title'] ?? 'Match',
+            'match':m,
+            ...h,
+            'collection':_rosterCollection(m, h),
+          });
+        }
+        // Keep historical/settled finance records even when the match is no
+        // longer in the active matches node.
+        rawHisaab.forEach((id, value) {
+          if (value is Map && !accounts.any((a) => a['id'].toString() == id.toString())) {
+            accounts.add({
+              'id':id.toString(),
+              ...Map<String,dynamic>.from(value),
+              'match':<String,dynamic>{'id':id.toString(),'title':value['title'] ?? 'Match','players':<String,dynamic>{}},
+            });
+          }
+        });
+        for (final pair in [
+          [responses[2], deposits],
+          [responses[3], withdrawals],
+        ]) {
+          final response = pair[0] as http.Response;
+          final target = pair[1] as List<Map>;
+          if (response.body.trim() != 'null') {
+            final data = jsonDecode(response.body);
+            if (data is Map) data.forEach((k,v) { if (v is Map) target.add({'id':k.toString(), ...Map<String,dynamic>.from(v)}); });
+          }
+        }
+        final txBody = responses[4].body.trim();
+        if (txBody == 'null') {
+          _txns = [];
+        } else {
+          final txData = jsonDecode(txBody);
+          if (txData is Map) {
+            _txns = txData.entries.where((e) => e.value is Map)
+              .map((e) => <String,dynamic>{'id':e.key.toString(), ...Map<String,dynamic>.from(e.value as Map)})
+              .toList()
+              ..sort((a,b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
+          }
         }
       } catch (e) {
         loadError = e.toString().replaceAll('Exception: ', '');
+      } finally {
+        loading = false;
+        refreshFinance?.call(() {});
       }
-      loading = false;
-      refreshFinance?.call(() {});
     }
     final routeFuture = Navigator.push<void>(
       context,
