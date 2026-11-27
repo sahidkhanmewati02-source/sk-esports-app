@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="480" viewBox="0 0 900 480">
+<defs>
+ <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff4b2"/><stop offset=".45" stop-color="#ffc329"/><stop offset="1" stop-color="#b35a00"/></linearGradient>
+ <linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff"/><stop offset=".55" stop-color="#c4c9dc"/><stop offset="1" stop-color="#65708e"/></linearGradient>
+ <filter id="p"><feGaussianBlur stdDeviation="9"/></filter>
+</defs>
+<path d="M450 18 L480 67 L530 37 L538 91 L591 86 L568 140 L332 140 L309 86 L362 91 L370 37 L420 67Z" fill="#ffb91d" opacity=".24" filter="url(#p)"/>
+<path d="M365 126 L375 48 L421 91 L450 20 L479 91 L525 48 L535 126" fill="none" stroke="url(#g)" stroke-width="16" stroke-linejoin="round"/>
+<circle cx="450" cy="32" r="12" fill="#fff1a0"/>
+<path d="M344 169 Q450 99 556 169 L536 273 Q450 326 364 273Z" fill="#17152a" stroke="#b42cff" stroke-width="10"/>
+<path d="M369 185 Q450 138 531 185 L516 231 Q450 255 384 231Z" fill="#252b40" stroke="url(#s)" stroke-width="9"/>
+<path d="M380 193 Q450 157 520 193 L508 215 L392 215Z" fill="#090d19"/>
+<path d="M399 251 L450 268 L501 251 L491 292 Q450 315 409 292Z" fill="#11182a" stroke="#7e8ba9" stroke-width="7"/>
+<path d="M420 272 L450 288 L480 272" fill="none" stroke="#d9deee" stroke-width="7"/>
+<path d="M295 291 L605 291 L660 356 L240 356Z" fill="#120c22" stroke="url(#g)" stroke-width="6"/>
+<text x="450" y="349" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="110" font-weight="900" font-style="italic" fill="url(#s)" stroke="#12091f" stroke-width="8" paint-order="stroke">SK</text>
+<path d="M274 374 L626 374" stroke="#b82cff" stroke-width="6"/>
+<text x="450" y="438" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="72" font-weight="900" letter-spacing="10" fill="url(#g)" stroke="#180b24" stroke-width="5" paint-order="stroke">ESPORTS</text>
+<text x="450" y="472" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="bold" letter-spacing="5" fill="#d7d2e9">BGMI CUSTOM TOURNAMENTS</text>
+</svg>
