@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -354,8 +355,12 @@ class _AuthScreenState extends State<AuthScreen> {
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.sports_esports, size: 52, color: Color(0xFFFF9800)),
-                const Text('SK ESPORTS', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                SvgPicture.asset(
+                  'assets/sk_login_logo.svg',
+                  width: 270,
+                  height: 170,
+                  fit: BoxFit.contain,
+                ),
                 Text(_isLogin ? 'Player Login' : 'Create Account', style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 14),
                 if (!_isLogin) ...[
