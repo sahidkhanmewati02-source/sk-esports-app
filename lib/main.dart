@@ -298,7 +298,14 @@ class _AuthScreenState extends State<AuthScreen> {
       );
       final data = jsonDecode(res.body);
       if (res.statusCode != 200) {
-        throw Exception(data['error']?['message'] ?? 'Auth Failed');
+        final authCode = (data['error']?['message'] ?? 'AUTH_FAILED').toString();
+        if (_isLogin && authCode == 'INVALID_LOGIN_CREDENTIALS') {
+          throw Exception('Email ya password Firebase Authentication se match nahi hua. Forgot Password se isi Gmail par password reset karein; purane saved login par bharosa na karein.');
+        }
+        if (_isLogin && authCode == 'USER_DISABLED') {
+          throw Exception('Ye Firebase account disabled hai. Firebase Authentication > Users mein account status check karein.');
+        }
+        throw Exception(authCode);
       }
       final String uid = data['localId'], token = data['idToken'];
       if (_isLogin) {
