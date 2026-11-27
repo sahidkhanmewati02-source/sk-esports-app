@@ -25,5 +25,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sk_login_logo.svg
+    - assets/sk_esports_selected.webp
 
 # In-app WebView ad screen dependency
