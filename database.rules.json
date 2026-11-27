@@ -12,7 +12,7 @@
           ".validate": "newData.isNumber() && newData.val() >= 0"
         },
         "role": {
-          ".write": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val())",
           ".validate": "newData.val() === 'coadmin' || newData.val() === 'player'"
         },
         "ign": {
