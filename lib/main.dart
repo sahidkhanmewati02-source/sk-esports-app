@@ -2355,12 +2355,20 @@ class _HomeScreenState extends State<HomeScreen> {
         body: jsonEncode({'role': make ? 'coadmin' : 'player'}),
       ).timeout(const Duration(seconds: 20));
       if (res.statusCode >= 200 && res.statusCode < 300) {
+        final permissionUrl = Uri.parse('$kDbUrl/adminPermissions/$uid.json?auth=${Uri.encodeQueryComponent(token)}');
+        final permissionResult = make
+            ? await http.put(permissionUrl, body: jsonEncode({for (final key in _permissionLabels.keys) key: false}))
+            : await http.delete(permissionUrl);
+        if (permissionResult.statusCode < 200 || permissionResult.statusCode >= 300) {
+          _msg('Role update ho gaya, lekin permissions reset nahi hui (HTTP ${permissionResult.statusCode}).');
+          return;
+        }
         if (!mounted) return;
         setState(() {
           final index = _users.indexWhere((u) => (u['uid'] ?? '').toString() == uid);
           if (index >= 0) _users[index]['role'] = make ? 'coadmin' : 'player';
         });
-        _msg(make ? 'Co-Admin bana diya.' : 'Co-Admin role successfully hata diya.');
+        _msg(make ? 'Co-Admin bana diya. Sab permissions OFF hain.' : 'Co-Admin role aur permissions hata di gayi.');
       } else {
         _msg('Role update failed (HTTP ${res.statusCode}): ${res.body}');
       }
