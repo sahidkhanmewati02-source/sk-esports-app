@@ -709,15 +709,25 @@ class _HomeScreenState extends State<HomeScreen> {
         _wallet = _num(d['wallet']);
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (_isCoAdmin) {
-          final permissionRes = await http.get(Uri.parse('$kDbUrl/adminPermissions/${widget.uid}.json?auth=${sessionToken}'));
+          _permissionLoadError = '';
+          _adminPermissions = {};
+          final permissionUri = Uri.parse('$kDbUrl/adminPermissions/${Uri.encodeComponent(widget.uid)}.json')
+              .replace(queryParameters: {'auth': sessionToken});
+          var permissionRes = await http.get(permissionUri).timeout(const Duration(seconds: 15));
+          // Retry once with a newly refreshed Firebase ID token if the first request is unauthorized.
+          if (permissionRes.statusCode == 401) {
+            final retryToken = await _freshAdminToken();
+            permissionRes = await http.get(
+              Uri.parse('$kDbUrl/adminPermissions/${Uri.encodeComponent(widget.uid)}.json')
+                  .replace(queryParameters: {'auth': retryToken}),
+            ).timeout(const Duration(seconds: 15));
+          }
           if (permissionRes.statusCode == 200) {
             _adminPermissions = permissionRes.body.trim() == 'null'
                 ? <String, dynamic>{}
                 : Map<String, dynamic>.from(jsonDecode(permissionRes.body) as Map);
-            _permissionLoadError = '';
           } else {
-            _adminPermissions = {};
-            _permissionLoadError = 'Permission read failed (HTTP ${permissionRes.statusCode}). Firebase Rules mein adminPermissions read access check karein.';
+            _permissionLoadError = 'Permission read failed (HTTP ${permissionRes.statusCode}): ${permissionRes.body}';
           }
         } else {
           _adminPermissions = {};
@@ -1958,11 +1968,11 @@ class _HomeScreenState extends State<HomeScreen> {
         runSpacing: 8,
         children: [
           if (isSuperAdmin) tile(_quickAction(Icons.admin_panel_settings, 'Co-Admin', _users.where((u) => u['role'] == 'coadmin').length, _showCoAdminDialog)),
-          tile(_quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, () => _runCoAdminAction('deposits_view', _showPendingDepositsDialog))),
-          tile(_quickAction(Icons.payments, 'Withdrawals', _withs.length, () => _runCoAdminAction('withdrawals_view', _showPendingWithdrawalsDialog))),
-          tile(_quickAction(Icons.groups, 'All Players', _users.length, () => _runCoAdminAction('players_view', _showAllPlayersDialog))),
-          tile(_quickAction(Icons.add, '+ Create', null, () => _runCoAdminAction('matches_manage', _addMatch))),
-          tile(_quickAction(Icons.check_circle, 'Completed', completed.length, () => _runCoAdminAction('matches_view', () => _showCompletedMatchesDialog(completed)), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
+          if (_can('deposits_view')) tile(_quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
+          if (_can('withdrawals_view')) tile(_quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
+          if (_can('players_view')) tile(_quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
+          if (_can('matches_manage')) tile(_quickAction(Icons.add, '+ Create', null, _addMatch)),
+          if (_can('matches_view')) tile(_quickAction(Icons.check_circle, 'Completed', completed.length, () => _showCompletedMatchesDialog(completed), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
         ],
       ),
     );
@@ -2468,8 +2478,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (uid.isEmpty) return;
     Map<String, dynamic> values = {};
     try {
-      final response = await http.get(Uri.parse('$kDbUrl/adminPermissions/$uid.json?auth=${widget.token}'));
-      if (response.statusCode != 200) return _msg('Permissions read failed (HTTP ${response.statusCode}).');
+      final token = await _freshAdminToken();
+      final response = await http.get(
+        Uri.parse('$kDbUrl/adminPermissions/${Uri.encodeComponent(uid)}.json')
+            .replace(queryParameters: {'auth': token}),
+      ).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return _msg('Permissions read failed (HTTP ${response.statusCode}): ${response.body}');
       if (response.body != 'null') values = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
     } catch (e) {
       return _msg('Permissions load nahi hui: $e');
@@ -2499,10 +2513,12 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () async {
                 final payload = <String, bool>{};
                 for (final key in _permissionLabels.keys) { payload[key] = values[key] == true; }
+                final saveToken = await _freshAdminToken();
                 final save = await http.put(
-                  Uri.parse('$kDbUrl/adminPermissions/$uid.json?auth=${widget.token}'),
+                  Uri.parse('$kDbUrl/adminPermissions/${Uri.encodeComponent(uid)}.json')
+                      .replace(queryParameters: {'auth': saveToken}),
                   body: jsonEncode(payload),
-                );
+                ).timeout(const Duration(seconds: 20));
                 if (save.statusCode < 200 || save.statusCode >= 300) {
                   _msg('Permission save failed (HTTP ${save.statusCode}).');
                   return;
