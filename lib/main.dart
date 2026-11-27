@@ -1772,8 +1772,7 @@ class _HomeScreenState extends State<HomeScreen> {
       content: SizedBox(width: double.maxFinite, height: 350, child: _deps.isEmpty ? const Center(child: Text('Koi pending deposit nahi hai')) : ListView.builder(itemCount: _deps.length, itemBuilder: (_, i) {
         final d = _deps[i];
         return Card(child: ListTile(title: Text('${d['ign']} • ₹${d['amt']}'), subtitle: Text('UTR: ${d['utr']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
-            if (!isSuperAdmin) return _msg('Deposit approve karne ka access sirf Super Admin ko hai.');
+          if (isSuperAdmin) IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
             final uid = d['uid'].toString();
             final depositCheck = await http.get(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'));
             if (depositCheck.statusCode != 200 || depositCheck.body.trim() == 'null') return _msg('Deposit record verify nahi hua; approval roki gayi.');
@@ -1798,7 +1797,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Deposit approval fail hui. Firebase Rules check karein.');
             _msg('Approved!'); _sync();
           }),
-          IconButton(icon: const Icon(Icons.cancel, color: Colors.redAccent), onPressed: () async { if (!isSuperAdmin) return _msg('Deposit reject karne ka access sirf Super Admin ko hai.'); Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'})); _sync(); }),
+          if (isSuperAdmin) IconButton(icon: const Icon(Icons.cancel, color: Colors.redAccent), onPressed: () async { Navigator.pop(ctx); await http.patch(Uri.parse('$kDbUrl/deposits/${d['id']}.json?auth=${widget.token}'), body: jsonEncode({'status': 'REJECTED'})); _sync(); }),
         ])));
       })),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
@@ -1813,8 +1812,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final wd = _withs[i];
         return Card(child: ListTile(title: Text('${wd['ign']} • ₹${wd['amt']}'), subtitle: Text('UPI: ${wd['upi']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(icon: const Icon(Icons.copy, color: Colors.lightBlueAccent), onPressed: () { Clipboard.setData(ClipboardData(text: '${wd['upi']}')); _msg('Player UPI Copied!'); }),
-          IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
-            if (!isSuperAdmin) return _msg('Withdrawal mark paid karne ka access sirf Super Admin ko hai.');
+          if (isSuperAdmin) IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
             Navigator.pop(ctx);
             final uid = wd['uid'].toString();
             final u = _users.firstWhere((e) => e['uid'] == uid, orElse: () => {});
