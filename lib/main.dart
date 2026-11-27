@@ -1942,20 +1942,21 @@ class _HomeScreenState extends State<HomeScreen> {
     final width = (MediaQuery.of(context).size.width - 44) / 3;
     final completed = _matches.where((dynamic m) => m is Map && _isMatchCompleted(m)).map((dynamic m) => m as Map).toList()
       ..sort((a, b) => _num(b['startAt']).compareTo(_num(a['startAt'])));
+    Widget tile(Widget child) => SizedBox(width: width, child: child);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Wrap(
         spacing: 6,
-        runSpacing: 6,
+        runSpacing: 8,
         children: [
-          _quickAction(Icons.sports_esports, 'Matches', _matches.length, () => _runCoAdminAction('matches_view', () => setState(() => _tab = 0))),
-          _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, () => _runCoAdminAction('deposits_view', _showPendingDepositsDialog)),
-          _quickAction(Icons.payments, 'Withdrawals', _withs.length, () => _runCoAdminAction('withdrawals_view', _showPendingWithdrawalsDialog)),
-          _quickAction(Icons.groups, 'All Players', _users.length, () => _runCoAdminAction('players_view', _showAllPlayersDialog)),
-          _quickAction(Icons.add, '+ Create', null, () => _runCoAdminAction('matches_manage', _addMatch)),
-          _quickAction(Icons.how_to_vote, 'Voting', null, () => _runCoAdminAction('voting_view', _showVotingManagerDialog)),
-          _quickAction(Icons.check_circle, 'Completed', completed.length, () => _runCoAdminAction('matches_view', () => _showCompletedMatchesDialog(completed)), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676)),
-          _quickAction(Icons.chat, 'Chat Tools', null, () => _runCoAdminAction('chat_moderate', () => setState(() => _tab = 2))),
+          tile(_quickAction(Icons.sports_esports, 'Matches', _matches.length, () => _runCoAdminAction('matches_view', () => setState(() => _tab = 0)))),
+          tile(_quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, () => _runCoAdminAction('deposits_view', _showPendingDepositsDialog))),
+          tile(_quickAction(Icons.payments, 'Withdrawals', _withs.length, () => _runCoAdminAction('withdrawals_view', _showPendingWithdrawalsDialog))),
+          tile(_quickAction(Icons.groups, 'All Players', _users.length, () => _runCoAdminAction('players_view', _showAllPlayersDialog))),
+          tile(_quickAction(Icons.add, '+ Create', null, () => _runCoAdminAction('matches_manage', _addMatch))),
+          tile(_quickAction(Icons.how_to_vote, 'Voting', null, () => _runCoAdminAction('voting_view', _showVotingManagerDialog))),
+          tile(_quickAction(Icons.check_circle, 'Completed', completed.length, () => _runCoAdminAction('matches_view', () => _showCompletedMatchesDialog(completed)), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
+          tile(_quickAction(Icons.chat, 'Chat Tools', null, () => _runCoAdminAction('chat_moderate', () => setState(() => _tab = 2)))),
         ],
       ),
     );
