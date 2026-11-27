@@ -3351,8 +3351,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
     final showAutoAd = _autoBannerAdEnabled && _adsterraBannerCode.trim().isNotEmpty;
     final showBanner = showPromo;
-    final showQuickActions = isAdmin;
-    final leadingItems = (showBanner ? 1 : 0) + (showQuickActions ? 1 : 0);
+    // Admin tools belong only inside the Admin tab, never on the Matches home.
+    final leadingItems = showBanner ? 1 : 0;
     final pages = [
       Column(children: [
         Expanded(child: ListView.builder(
@@ -3378,8 +3378,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             );
           }
-          final quickIndex = showPromo ? 1 : 0;
-          if (showQuickActions && i == quickIndex) return _adminQuickActions();
           final m = _matches[i - leadingItems],
               joined = m['isJoined'] == true,
               isFull = _matchPlayerCount(m) >= _num(m['slots']),
