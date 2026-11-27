@@ -481,6 +481,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isCoAdmin = false;
   bool get isAdmin => isSuperAdmin || _isCoAdmin;
   Map<String, dynamic> _adminPermissions = {};
+  String _permissionLoadError = '';
   static const Map<String, String> _permissionLabels = {
     'matches_view': 'Matches • View players and match details',
     'matches_manage': 'Matches • Create, edit, delete, room and hold',
@@ -701,13 +702,18 @@ class _HomeScreenState extends State<HomeScreen> {
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (_isCoAdmin) {
           final permissionRes = await http.get(Uri.parse('$kDbUrl/adminPermissions/${widget.uid}.json?auth=${widget.token}'));
-          if (permissionRes.statusCode == 200 && permissionRes.body != 'null') {
-            _adminPermissions = Map<String, dynamic>.from(jsonDecode(permissionRes.body) as Map);
+          if (permissionRes.statusCode == 200) {
+            _adminPermissions = permissionRes.body.trim() == 'null'
+                ? <String, dynamic>{}
+                : Map<String, dynamic>.from(jsonDecode(permissionRes.body) as Map);
+            _permissionLoadError = '';
           } else {
             _adminPermissions = {};
+            _permissionLoadError = 'Permission read failed (HTTP ${permissionRes.statusCode}). Firebase Rules mein adminPermissions read access check karein.';
           }
         } else {
           _adminPermissions = {};
+          _permissionLoadError = '';
         }
         if (d['txns'] is Map) {
           _txns = (d['txns'] as Map).entries
@@ -1933,6 +1939,7 @@ class _HomeScreenState extends State<HomeScreen> {
         spacing: 6,
         runSpacing: 6,
         children: [
+          if (_can('matches_view')) SizedBox(width: width, child: _quickAction(Icons.sports_esports, 'Matches', _matches.length, () => setState(() => _tab = 0))),
           if (_can('deposits_view')) SizedBox(width: width, child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
           if (_can('withdrawals_view')) SizedBox(width: width, child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
           if (_can('players_view')) SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
@@ -3293,6 +3300,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showPaymentSettingsDialog() {
+    if (!isSuperAdmin) {
+      _msg('UPI ID aur QR Code sirf Super Admin change kar sakta hai.');
+      return;
+    }
     if (!isSuperAdmin) return;
     showDialog(
       context: context,
@@ -3504,6 +3515,25 @@ class _HomeScreenState extends State<HomeScreen> {
             const Text('CO-ADMIN CONTROL PANEL', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 10),
             _adminQuickActions(),
+            if (_permissionLoadError.isNotEmpty)
+              Card(color: Colors.red.withOpacity(0.10), child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Text(_permissionLoadError, style: const TextStyle(color: Colors.redAccent)),
+              )),
+            if (!_permissionLabels.keys.any(_can))
+              Card(child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Abhi koi Co-Admin permission active nahi hai.', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 5),
+                  const Text('Super Admin se is account ke switches ON karwao, phir upar Refresh dabao.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  Align(alignment: Alignment.centerRight, child: TextButton.icon(
+                    onPressed: _sync,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Reload Permissions'),
+                  )),
+                ]),
+              )),
             if (_can('voting_view') || _can('matches_view')) const Text('Admin Picks and player results are available from each match card.', style: TextStyle(color: Colors.grey, fontSize: 12)),
             const Divider(),
           ],
