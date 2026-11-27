@@ -2305,11 +2305,51 @@ class _HomeScreenState extends State<HomeScreen> {
     final res = await http.patch(Uri.parse('$kDbUrl/config.json?auth=' + widget.token), body: jsonEncode({'aboutLinks': links, 'rulesText': _rulesC.text.trim()}));
     if (res.statusCode >= 200 && res.statusCode < 300) { setState(() { _aboutLinks = links; _rulesText = _rulesC.text.trim(); }); _msg('About & Rules save ho gaye.'); } else _msg('About & Rules save nahi hue. Firebase Rules check karein.');
   }
+  Future<String> _freshAdminToken() async {
+    final sp = await SharedPreferences.getInstance();
+    final refreshToken = sp.getString('rt');
+    if (refreshToken == null || refreshToken.isEmpty) {
+      throw Exception('Login session expire hai. Logout karke dobara login karein.');
+    }
+    final response = await http.post(
+      Uri.parse('https://securetoken.googleapis.com/v1/token?key=$kApiKey'),
+      body: {'grant_type': 'refresh_token', 'refresh_token': refreshToken},
+    ).timeout(const Duration(seconds: 20));
+    if (response.statusCode != 200) {
+      throw Exception('Session refresh failed HTTP ${response.statusCode}: ${response.body}');
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final freshRefreshToken = data['refresh_token']?.toString();
+    if (freshRefreshToken != null && freshRefreshToken.isNotEmpty) {
+      await sp.setString('rt', freshRefreshToken);
+    }
+    return data['id_token'].toString();
+  }
+
   Future<void> _toggleCoAdmin(Map user) async {
     if (!isSuperAdmin || user['email']?.toString().toLowerCase() == kAdmin.toLowerCase()) return;
+    final uid = (user['uid'] ?? '').toString();
+    if (uid.isEmpty) { _msg('Player UID nahi mila; role change nahi hua.'); return; }
     final make = user['role'] != 'coadmin';
-    final res = await http.patch(Uri.parse('$kDbUrl/users/' + user['uid'].toString() + '.json?auth=' + widget.token), body: jsonEncode({'role': make ? 'coadmin' : 'player'}));
-    if (res.statusCode >= 200 && res.statusCode < 300) { _msg(make ? 'Co-Admin bana diya.' : 'Co-Admin role hata diya.'); _sync(); } else _msg('Role update nahi hua. Firebase Rules check karein.');
+    try {
+      final token = await _freshAdminToken();
+      final res = await http.patch(
+        Uri.parse('$kDbUrl/users/${Uri.encodeComponent(uid)}.json?auth=${Uri.encodeQueryComponent(token)}'),
+        body: jsonEncode({'role': make ? 'coadmin' : 'player'}),
+      ).timeout(const Duration(seconds: 20));
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        if (!mounted) return;
+        setState(() {
+          final index = _users.indexWhere((u) => (u['uid'] ?? '').toString() == uid);
+          if (index >= 0) _users[index]['role'] = make ? 'coadmin' : 'player';
+        });
+        _msg(make ? 'Co-Admin bana diya.' : 'Co-Admin role successfully hata diya.');
+      } else {
+        _msg('Role update failed (HTTP ${res.statusCode}): ${res.body}');
+      }
+    } catch (e) {
+      _msg('Role update nahi hua: $e');
+    }
   }
   int get _activeCoAdminCount => _users.where((u) => u['email']?.toString().toLowerCase() != kAdmin.toLowerCase() && u['role'] == 'coadmin').length;
 
