@@ -473,6 +473,20 @@ class _HomeScreenState extends State<HomeScreen> {
   bool get isSuperAdmin => widget.email.toLowerCase() == kAdmin.toLowerCase();
   bool _isCoAdmin = false;
   bool get isAdmin => isSuperAdmin || _isCoAdmin;
+  Map<String, dynamic> _adminPermissions = {};
+  static const Map<String, String> _permissionLabels = {
+    'matches_view': 'Matches • View players and match details',
+    'matches_manage': 'Matches • Create, edit, delete, room and hold',
+    'players_view': 'Players • View player list and profiles',
+    'deposits_view': 'Deposits • View deposit requests',
+    'deposits_manage': 'Deposits • Approve / reject deposits',
+    'withdrawals_view': 'Withdrawals • View withdrawal requests',
+    'withdrawals_manage': 'Withdrawals • Mark withdrawals paid / reject',
+    'chat_moderate': 'Chat • Delete and moderate messages',
+    'finance_view': 'Finance • View earnings and match hisaab',
+    'finance_manage': 'Finance • Settle and manage match hisaab',
+  };
+  bool _can(String key) => isSuperAdmin || (_isCoAdmin && _adminPermissions[key] == true);
   int _tab = 0, _wallet = 0;
   String _ign = 'Player', _bgmiId = 'Not Set', _upiId = 'skesports@upi', _qrUrl = '';
   String _joinAdUrl = 'https://example.com', _roomAdUrl = 'https://example.com';
@@ -680,6 +694,16 @@ class _HomeScreenState extends State<HomeScreen> {
         _bgmiId = d['bgmiId'] ?? 'Not Set';
         _wallet = _num(d['wallet']);
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
+        if (_isCoAdmin) {
+          final permissionRes = await http.get(Uri.parse('$kDbUrl/adminPermissions/${widget.uid}.json?auth=${widget.token}'));
+          if (permissionRes.statusCode == 200 && permissionRes.body != 'null') {
+            _adminPermissions = Map<String, dynamic>.from(jsonDecode(permissionRes.body) as Map);
+          } else {
+            _adminPermissions = {};
+          }
+        } else {
+          _adminPermissions = {};
+        }
         if (d['txns'] is Map) {
           _txns = (d['txns'] as Map).entries
               .where((entry) => entry.value is Map)
@@ -2359,6 +2383,62 @@ class _HomeScreenState extends State<HomeScreen> {
   int get _activeCoAdminCount => _users.where((u) => u['email']?.toString().toLowerCase() != kAdmin.toLowerCase() && u['role'] == 'coadmin').length;
 
 
+  Future<void> _editCoAdminPermissions(Map user) async {
+    if (!isSuperAdmin) return;
+    final uid = (user['uid'] ?? '').toString();
+    if (uid.isEmpty) return;
+    Map<String, dynamic> values = {};
+    try {
+      final response = await http.get(Uri.parse('$kDbUrl/adminPermissions/$uid.json?auth=${widget.token}'));
+      if (response.statusCode != 200) return _msg('Permissions read failed (HTTP ${response.statusCode}).');
+      if (response.body != 'null') values = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    } catch (e) {
+      return _msg('Permissions load nahi hui: $e');
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setPermissionState) => AlertDialog(
+          title: Text('Permissions • ${user['ign'] ?? user['name'] ?? 'Co-Admin'}'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 460,
+            child: ListView(
+              children: _permissionLabels.entries.map((entry) => SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text(entry.value, style: const TextStyle(fontSize: 13)),
+                value: values[entry.key] == true,
+                onChanged: (enabled) => setPermissionState(() => values[entry.key] = enabled),
+              )).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                final payload = <String, bool>{};
+                for (final key in _permissionLabels.keys) { payload[key] = values[key] == true; }
+                final save = await http.put(
+                  Uri.parse('$kDbUrl/adminPermissions/$uid.json?auth=${widget.token}'),
+                  body: jsonEncode(payload),
+                );
+                if (save.statusCode < 200 || save.statusCode >= 300) {
+                  _msg('Permission save failed (HTTP ${save.statusCode}).');
+                  return;
+                }
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                _msg('Co-Admin permissions save ho gayi.');
+              },
+              child: const Text('Save Permissions'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showCoAdminDialog() {
     if (!isSuperAdmin) return;
     final searchC = TextEditingController();
@@ -2470,6 +2550,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.end,
                                         children: [
+                                          if (isCoAdmin) IconButton(
+                                            tooltip: 'Set Permissions',
+                                            icon: const Icon(Icons.tune, color: Color(0xFFFF9800)),
+                                            onPressed: () => _editCoAdminPermissions(u),
+                                          ),
                                           TextButton(
                                             onPressed: () async {
                                               await _toggleCoAdmin(u);
