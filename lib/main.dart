@@ -355,13 +355,6 @@ class _AuthScreenState extends State<AuthScreen> {
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Image.asset(
-                  'assets/sk_esports_logo.png',
-                  width: 250,
-                  height: 250,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                ),
                 Text(_isLogin ? 'Player Login' : 'Create Account', style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 14),
                 if (!_isLogin) ...[
