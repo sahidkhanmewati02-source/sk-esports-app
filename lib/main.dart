@@ -1205,43 +1205,37 @@ class _HomeScreenState extends State<HomeScreen> {
     final accounts = <Map>[];
     final deposits = <Map>[];
     final withdrawals = <Map>[];
+    DateTime? lastFinanceRefresh;
     Future<void> reloadFinance() async {
       if (loading) return;
       loading = true;
       loadError = null;
       refreshFinance?.call(() {});
       try {
-        // Finance uses its own bounded, read-only requests. Do not call _sync()
-        // here because that also reloads the entire admin home and can leave
-        // this pushed route waiting on unrelated Firebase operations.
-        final responses = await Future.wait<http.Response>([
-          http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
-          http.get(Uri.parse('$kDbUrl/match_hisaab.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
-          http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
-          http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
-          http.get(Uri.parse('$kDbUrl/users/${widget.uid}/txns.json?auth=${widget.token}')).timeout(const Duration(seconds: 12)),
+        // Core Finance data is independent from optional history nodes.
+        // A denied/empty deposits or transaction request must not block the dashboard.
+        final core = await Future.wait<http.Response>([
+          http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}')).timeout(const Duration(seconds: 15)),
+          http.get(Uri.parse('$kDbUrl/match_hisaab.json?auth=${widget.token}')).timeout(const Duration(seconds: 15)),
         ]);
-        for (var i = 0; i < responses.length; i++) {
-          if (responses[i].statusCode != 200) {
-            throw Exception('Finance data read failed (HTTP ${responses[i].statusCode}, request ${i + 1})');
+        for (var i = 0; i < core.length; i++) {
+          if (core[i].statusCode != 200) {
+            throw Exception('Finance data read failed (HTTP ${core[i].statusCode}, request ${i + 1})');
           }
         }
-        // Replace the displayed snapshot only after every request succeeds.
-        accounts.clear();
-        deposits.clear();
-        withdrawals.clear();
         final liveMatches = <Map<String,dynamic>>[];
-        if (responses[0].body.trim() != 'null') {
-          final rawMatches = jsonDecode(responses[0].body);
+        if (core[0].body.trim() != 'null') {
+          final rawMatches = jsonDecode(core[0].body);
           if (rawMatches is Map) {
             rawMatches.forEach((id, value) {
               if (value is Map) liveMatches.add({...Map<String,dynamic>.from(value), 'id':id.toString()});
             });
           }
         }
-        final rawHisaab = responses[1].body.trim() == 'null'
+        final rawHisaab = core[1].body.trim() == 'null'
             ? <String,dynamic>{}
-            : (jsonDecode(responses[1].body) as Map).map((k,v) => MapEntry(k.toString(),v));
+            : (jsonDecode(core[1].body) as Map).map((k,v) => MapEntry(k.toString(),v));
+        final freshAccounts = <Map>[];
         for (final m in liveMatches) {
           final id = m['id'].toString();
           final saved = rawHisaab[id] is Map
@@ -1256,7 +1250,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'adminPayments':saved['adminPayments'] ?? <String,dynamic>{},
             ...saved,
           };
-          accounts.add({
+          freshAccounts.add({
             'id':id,
             'title':m['title'] ?? h['title'] ?? 'Match',
             'match':m,
@@ -1264,40 +1258,57 @@ class _HomeScreenState extends State<HomeScreen> {
             'collection':_rosterCollection(m, h),
           });
         }
-        // Keep historical/settled finance records even when the match is no
-        // longer in the active matches node.
         rawHisaab.forEach((id, value) {
-          if (value is Map && !accounts.any((a) => a['id'].toString() == id.toString())) {
-            accounts.add({
+          if (value is Map && !freshAccounts.any((a) => a['id'].toString() == id.toString())) {
+            freshAccounts.add({
               'id':id.toString(),
               ...Map<String,dynamic>.from(value),
               'match':<String,dynamic>{'id':id.toString(),'title':value['title'] ?? 'Match','players':<String,dynamic>{}},
             });
           }
         });
-        for (final pair in [
-          [responses[2], deposits],
-          [responses[3], withdrawals],
-        ]) {
-          final response = pair[0] as http.Response;
-          final target = pair[1] as List<Map>;
-          if (response.body.trim() != 'null') {
-            final data = jsonDecode(response.body);
-            if (data is Map) data.forEach((k,v) { if (v is Map) target.add({'id':k.toString(), ...Map<String,dynamic>.from(v)}); });
-          }
+        accounts
+          ..clear()
+          ..addAll(freshAccounts);
+
+        // Optional supporting lists: update each when permitted, without
+        // preventing the core match/profit dashboard from refreshing.
+        Future<void> loadOptional(String path, List<Map> target) async {
+          try {
+            final response = await http.get(Uri.parse('$kDbUrl/$path.json?auth=${widget.token}')).timeout(const Duration(seconds: 10));
+            if (response.statusCode != 200) return;
+            final next = <Map>[];
+            if (response.body.trim() != 'null') {
+              final data = jsonDecode(response.body);
+              if (data is Map) data.forEach((k,v) { if (v is Map) next.add({'id':k.toString(), ...Map<String,dynamic>.from(v)}); });
+            }
+            target
+              ..clear()
+              ..addAll(next);
+          } catch (_) {}
         }
-        final txBody = responses[4].body.trim();
-        if (txBody == 'null') {
-          _txns = [];
-        } else {
-          final txData = jsonDecode(txBody);
-          if (txData is Map) {
-            _txns = txData.entries.where((e) => e.value is Map)
-              .map((e) => <String,dynamic>{'id':e.key.toString(), ...Map<String,dynamic>.from(e.value as Map)})
-              .toList()
-              ..sort((a,b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
+        await Future.wait([
+          loadOptional('deposits', deposits),
+          loadOptional('withdrawals', withdrawals),
+        ]);
+        try {
+          final txResponse = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}/txns.json?auth=${widget.token}')).timeout(const Duration(seconds: 10));
+          if (txResponse.statusCode == 200) {
+            final txBody = txResponse.body.trim();
+            if (txBody == 'null') {
+              _txns = [];
+            } else {
+              final txData = jsonDecode(txBody);
+              if (txData is Map) {
+                _txns = txData.entries.where((e) => e.value is Map)
+                  .map((e) => <String,dynamic>{'id':e.key.toString(), ...Map<String,dynamic>.from(e.value as Map)})
+                  .toList()
+                  ..sort((a,b) => _historyTimestamp(b).compareTo(_historyTimestamp(a)));
+              }
+            }
           }
-        }
+        } catch (_) {}
+        lastFinanceRefresh = DateTime.now();
       } catch (e) {
         loadError = e.toString().replaceAll('Exception: ', '');
       } finally {
@@ -1371,8 +1382,10 @@ class _HomeScreenState extends State<HomeScreen> {
             actions: [
               IconButton(
                 tooltip: 'Refresh Finance',
-                onPressed: reloadFinance,
-                icon: const Icon(Icons.refresh),
+                onPressed: loading ? null : () { reloadFinance(); },
+                icon: loading
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.refresh_rounded),
               ),
             ],
           ),
@@ -1442,22 +1455,83 @@ class _HomeScreenState extends State<HomeScreen> {
               players.add({'match': a['title'], ...p});
             }
           }
-          Widget metric(String label, String value) {
-            return Card(child: ListTile(title: Text(label), trailing: Text(value, style: const TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold))));
+          Widget metric(String label, String value, IconData icon, {bool highlight = false}) {
+            return SizedBox(
+              width: (MediaQuery.of(ctx).size.width - 42) / 2,
+              child: Card(
+                elevation: 0,
+                color: highlight ? const Color(0xFF24202A) : const Color(0xFF1B1B24),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: BorderSide(color: highlight ? const Color(0xFF00D68F).withOpacity(.30) : Colors.white.withOpacity(.06)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(icon, size: 20, color: highlight ? const Color(0xFF00D68F) : const Color(0xFFFFA21A)),
+                    const SizedBox(height: 12),
+                    Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: highlight ? const Color(0xFF00D68F) : Colors.white)),
+                    const SizedBox(height: 4),
+                    Text(label, maxLines: 2, style: const TextStyle(fontSize: 12, color: Colors.white60)),
+                  ]),
+                ),
+              ),
+            );
           }
           Widget page;
           if (tab == 0) {
-            page = ListView(children: [
-              metric('Total Earning • All Time', '₹' + allTimeCredits.toString()),
-              metric('This Month Earning', '₹' + thisMonthCredits.toString()),
-              if (financeMonthKeys.isNotEmpty) const Padding(padding: EdgeInsets.fromLTRB(16,12,16,4), child: Text('MONTH-WISE EARNINGS', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF9800)))),
-              if (financeMonthKeys.isNotEmpty) SizedBox(height: 74, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: financeMonthKeys.map((k) => SizedBox(width: 130, child: Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(financeMonthLabel(k), style: const TextStyle(fontSize: 12, color: Colors.grey)), const SizedBox(height: 4), Text('₹${financeMonthly[k]}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00E676), fontSize: 17))]))))).toList())),
-              metric('Total Collection', '₹' + collection.toString()),
-              metric('Player Prizes', '₹' + prizes.toString()),
-              metric('Expenses', '₹' + expenses.toString()),
-              metric('Net Profit', '₹' + net.toString()),
-              metric('Admins Pool • 25%', '₹' + (net > 0 ? net * .25 : 0).toStringAsFixed(2)),
-              metric('SK eSports • 75%', '₹' + (net > 0 ? net * .75 : 0).toStringAsFixed(2)),
+            page = ListView(padding: const EdgeInsets.fromLTRB(12, 14, 12, 24), children: [
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(22),
+                  gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF292333), Color(0xFF1B1B24)]),
+                  border: Border.all(color: const Color(0xFFFFA21A).withOpacity(.22)),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('EARNINGS SUMMARY', style: TextStyle(fontSize: 11, letterSpacing: 1.4, color: Colors.white60, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Text('₹${allTimeCredits}', style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: Color(0xFF00D68F))),
+                  const Text('Total earning • All time', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(height: 16),
+                  Container(height: 1, color: Colors.white12),
+                  const SizedBox(height: 13),
+                  Row(children: [
+                    const Icon(Icons.calendar_month_rounded, color: Color(0xFFFFA21A), size: 19),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('This month', style: TextStyle(color: Colors.white70))),
+                    Text('₹${thisMonthCredits}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: Colors.white)),
+                  ]),
+                ]),
+              ),
+              if (financeMonthKeys.isNotEmpty) ...[
+                const Padding(padding: EdgeInsets.fromLTRB(4, 22, 4, 10), child: Text('MONTHLY EARNINGS', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: .8, color: Color(0xFFFFA21A)))),
+                SizedBox(height: 94, child: ListView(scrollDirection: Axis.horizontal, children: financeMonthKeys.map((k) => Container(
+                  width: 148,
+                  margin: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: const Color(0xFF1B1B24), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Text(financeMonthLabel(k), style: const TextStyle(fontSize: 12, color: Colors.white60)),
+                    const SizedBox(height: 7),
+                    Text('₹${financeMonthly[k]}', style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF00D68F), fontSize: 20)),
+                  ]),
+                )).toList())),
+              ],
+              const Padding(padding: EdgeInsets.fromLTRB(4, 22, 4, 10), child: Text('MATCH FINANCIALS', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: .8, color: Color(0xFFFFA21A)))),
+              Wrap(spacing: 10, runSpacing: 10, children: [
+                metric('Total collection', '₹${collection}', Icons.payments_outlined),
+                metric('Player prizes', '₹${prizes}', Icons.emoji_events_outlined),
+                metric('Match expenses', '₹${expenses}', Icons.receipt_long_outlined),
+                metric('Net profit', '₹${net}', Icons.trending_up_rounded, highlight: true),
+              ]),
+              const Padding(padding: EdgeInsets.fromLTRB(4, 22, 4, 10), child: Text('PROFIT DISTRIBUTION', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: .8, color: Color(0xFFFFA21A)))),
+              Row(children: [
+                Expanded(child: metric('Admins pool • 25%', '₹${(net > 0 ? net * .25 : 0).toStringAsFixed(2)}', Icons.groups_2_outlined)),
+                const SizedBox(width: 10),
+                Expanded(child: metric('SK eSports • 75%', '₹${(net > 0 ? net * .75 : 0).toStringAsFixed(2)}', Icons.workspace_premium_outlined, highlight: true)),
+              ]),
+              if (loadError != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text('Refresh warning: $loadError', style: const TextStyle(color: Colors.orangeAccent, fontSize: 12))),
             ]);
           } else if (tab == 1) {
             final widgets = <Widget>[];
@@ -1558,6 +1632,22 @@ class _HomeScreenState extends State<HomeScreen> {
             page = ListView(children: widgets);
           }
           return Column(children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              color: const Color(0xFF11151D),
+              child: Row(children: [
+                const Icon(Icons.verified_outlined, size: 15, color: Color(0xFF00D68F)),
+                const SizedBox(width: 7),
+                Expanded(child: Text(
+                  lastFinanceRefresh == null
+                      ? (loading ? 'Updating Finance data…' : 'Finance overview')
+                      : 'Updated ${TimeOfDay.fromDateTime(lastFinanceRefresh!).format(ctx)}',
+                  style: const TextStyle(fontSize: 12, color: Colors.white60),
+                )),
+                if (loadError != null) const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orangeAccent),
+              ]),
+            ),
             SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
               for (var i = 0; i < 4; i++) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(['Overview', 'Match Manager', 'All Players', 'Payments'][i]), selected: tab == i, onSelected: (_) => setD(() => tab = i))),
             ])),
