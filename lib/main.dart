@@ -1766,7 +1766,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (res.statusCode >= 200 && res.statusCode < 300) { setState(() => m['hold'] = hold); _msg(hold ? 'Match HOLD par hai; room release ruk gaya.' : 'Match resume kar diya.'); } else { _msg('Hold status save nahi hua.'); }
   }
   void _showPendingDepositsDialog() {
-    if (!isSuperAdmin) return _msg('Deposits sirf Super Admin manage kar sakta hai.');
+    if (!_can('deposits_view')) return _msg('Deposits dekhne ki permission nahi hai.');
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: Text('Pending UTR Deposits (${_deps.length})', style: const TextStyle(fontSize: 15)),
       content: SizedBox(width: double.maxFinite, height: 350, child: _deps.isEmpty ? const Center(child: Text('Koi pending deposit nahi hai')) : ListView.builder(itemCount: _deps.length, itemBuilder: (_, i) {
@@ -1806,7 +1806,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showPendingWithdrawalsDialog() {
-    if (!isSuperAdmin) return _msg('Withdrawals sirf Super Admin manage kar sakta hai.');
+    if (!_can('withdrawals_view')) return _msg('Withdrawals dekhne ki permission nahi hai.');
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontSize: 15)),
       content: SizedBox(width: double.maxFinite, height: 350, child: _withs.isEmpty ? const Center(child: Text('Koi pending withdrawal nahi hai')) : ListView.builder(itemCount: _withs.length, itemBuilder: (_, i) {
