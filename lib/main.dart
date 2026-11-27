@@ -479,12 +479,7 @@ class _HomeScreenState extends State<HomeScreen> {
     'matches_manage': 'Matches • Create, edit, delete, room and hold',
     'players_view': 'Players • View player list and profiles',
     'deposits_view': 'Deposits • View deposit requests',
-    'deposits_manage': 'Deposits • Approve / reject deposits',
     'withdrawals_view': 'Withdrawals • View withdrawal requests',
-    'withdrawals_manage': 'Withdrawals • Mark withdrawals paid / reject',
-    'chat_moderate': 'Chat • Delete and moderate messages',
-    'finance_view': 'Finance • View earnings and match hisaab',
-    'finance_manage': 'Finance • Settle and manage match hisaab',
   };
   bool _can(String key) => isSuperAdmin || (_isCoAdmin && _adminPermissions[key] == true);
   int _tab = 0, _wallet = 0;
