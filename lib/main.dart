@@ -656,8 +656,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future _sync() async {
     setState(() => _loading = true);
+    // Firebase ID tokens expire; refresh before protected REST reads.
+    String sessionToken;
     try {
-      final cRes = await http.get(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'));
+      sessionToken = await _freshAdminToken();
+    } catch (e) {
+      sessionToken = widget.token;
+      _permissionLoadError = 'Session refresh failed: $e';
+    }
+    try {
+      final cRes = await http.get(Uri.parse('$kDbUrl/config.json?auth=${sessionToken}'));
       if (cRes.statusCode == 200 && cRes.body != 'null') {
         final c = jsonDecode(cRes.body);
         _upiId = c['upiId'] ?? 'skesports@upi';
@@ -678,17 +686,17 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (isSuperAdmin) {
         _superAdminUid = widget.uid;
-        await http.patch(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'), body: jsonEncode({'superAdminUid': widget.uid}));
+        await http.patch(Uri.parse('$kDbUrl/config.json?auth=${sessionToken}'), body: jsonEncode({'superAdminUid': widget.uid}));
       }
       _upiC.text = _upiId;
       _qrC.text = _qrUrl;
 
-      final uRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
+      final uRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${sessionToken}'));
       if (uRes.statusCode != 200) throw Exception('Profile read failed (${uRes.statusCode}); UID/session ya Rules mismatch ho sakta hai. Data overwrite nahi kiya.');
       var profileBody = uRes.body;
       if (profileBody.trim() == 'null') {
         await _recoverMissingProfileInHome();
-        final recovered = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${widget.token}'));
+        final recovered = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}.json?auth=${sessionToken}'));
         if (recovered.statusCode != 200 || recovered.body.trim() == 'null') {
           throw Exception('Is UID ka profile abhi bhi nahi mila. Recovery result: HTTP ${recovered.statusCode} ${recovered.body}');
         }
@@ -701,7 +709,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _wallet = _num(d['wallet']);
         _isCoAdmin = !isSuperAdmin && d['role'] == 'coadmin';
         if (_isCoAdmin) {
-          final permissionRes = await http.get(Uri.parse('$kDbUrl/adminPermissions/${widget.uid}.json?auth=${widget.token}'));
+          final permissionRes = await http.get(Uri.parse('$kDbUrl/adminPermissions/${widget.uid}.json?auth=${sessionToken}'));
           if (permissionRes.statusCode == 200) {
             _adminPermissions = permissionRes.body.trim() == 'null'
                 ? <String, dynamic>{}
@@ -726,7 +734,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
-      final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${widget.token}'));
+      final mRes = await http.get(Uri.parse('$kDbUrl/matches.json?auth=${sessionToken}'));
       if (mRes.statusCode != 200) throw Exception('Matches read failed (${mRes.statusCode}); matches ko write/reset nahi kiya gaya.');
       if (mRes.body != 'null') {
         final list = [];
@@ -750,7 +758,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       if (isSuperAdmin) {
-        final hRes = await http.get(Uri.parse('$kDbUrl/match_hisaab.json?auth=${widget.token}'));
+        final hRes = await http.get(Uri.parse('$kDbUrl/match_hisaab.json?auth=${sessionToken}'));
         final raw = hRes.statusCode == 200 && hRes.body != 'null' ? jsonDecode(hRes.body) as Map : <String, dynamic>{};
         final accounts = <Map>[];
         for (final match in _matches) {
@@ -758,7 +766,7 @@ class _HomeScreenState extends State<HomeScreen> {
           final saved = raw[id] is Map ? Map<String, dynamic>.from(raw[id]) : <String, dynamic>{};
           if (saved.isEmpty) {
             final fresh = {'title': match['title'] ?? 'Match', 'collection': 0, 'prizeSent': 0, 'settled': false, 'status': 'OPEN', 'updatedAt': DateTime.now().millisecondsSinceEpoch};
-            await http.put(Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${widget.token}'), body: jsonEncode(fresh));
+            await http.put(Uri.parse('$kDbUrl/match_hisaab/$id.json?auth=${sessionToken}'), body: jsonEncode(fresh));
             accounts.add({'id': id, ...fresh});
           } else {
             accounts.add({'id': id, ...saved, 'title': saved['title'] ?? match['title'] ?? 'Match'});
@@ -775,14 +783,14 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       if (isAdmin) {
-        final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
+        final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${sessionToken}'));
         if (chatRes.statusCode != 200) throw Exception('Chat read failed (${chatRes.statusCode}); chat ko empty nahi maana gaya.');
         final chats = <Map>[];
         if (chatRes.statusCode == 200 && chatRes.body != 'null') (jsonDecode(chatRes.body) as Map).forEach((k, v) { if (v is Map) chats.add({...v, 'id': k}); });
         _chatMessages = chats;
         // Co-Admins can read these queues only when Super Admin grants view access.
         if (isSuperAdmin || _can('deposits_view')) {
-          final dRes = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
+          final dRes = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${sessionToken}'));
           if (dRes.statusCode != 200) throw Exception('Deposits read failed (${dRes.statusCode}); records ko empty nahi maana gaya.');
           final deps = [];
           if (dRes.body != 'null') {
@@ -791,7 +799,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _deps = deps.reversed.toList();
         } else { _deps = []; }
         if (isSuperAdmin || _can('withdrawals_view')) {
-          final wRes = await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));
+          final wRes = await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${sessionToken}'));
           if (wRes.statusCode != 200) throw Exception('Withdrawals read failed (${wRes.statusCode}); records ko empty nahi maana gaya.');
           final withs = [];
           if (wRes.body != 'null') {
@@ -801,7 +809,7 @@ class _HomeScreenState extends State<HomeScreen> {
         } else { _withs = []; }
 
         if (isSuperAdmin || _can('players_view')) {
-          final allRes = await http.get(Uri.parse('$kDbUrl/users.json?auth=${widget.token}'));
+          final allRes = await http.get(Uri.parse('$kDbUrl/users.json?auth=${sessionToken}'));
           if (allRes.statusCode != 200) throw Exception('All players read failed (${allRes.statusCode}); players ko empty nahi maana gaya.');
           final usrs = [];
           if (allRes.body != 'null') (jsonDecode(allRes.body) as Map).forEach((k, v) { if (v is Map) usrs.add({...v, 'uid': k}); });
@@ -809,12 +817,12 @@ class _HomeScreenState extends State<HomeScreen> {
         } else { _users = []; }
         if (isSuperAdmin) await _refreshAdminDirectory();
       } else {
-        final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
+        final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${sessionToken}'));
         final chats = <Map>[];
         if (chatRes.statusCode == 200 && chatRes.body != 'null') (jsonDecode(chatRes.body) as Map).forEach((k, v) { if (v is Map) chats.add({...v, 'id': k}); });
         _chatMessages = chats;
       }
-      final cfgRes = await http.get(Uri.parse('$kDbUrl/config.json?auth=${widget.token}'));
+      final cfgRes = await http.get(Uri.parse('$kDbUrl/config.json?auth=${sessionToken}'));
       if (cfgRes.statusCode == 200 && cfgRes.body != 'null') {
         final cfg = jsonDecode(cfgRes.body);
         _aboutLinks = cfg['aboutLinks'] is List ? List.from(cfg['aboutLinks']) : [{'label':'Support DM','url':'https://t.me/SK_EsportsSupport'},{'label':'Official Telegram','url':'https://t.me/SK_ESPORTSOFFICIAL'},{'label':'YouTube - SK Sahid YT','url':'https://youtube.com/@sk_sahidyt'},{'label':'Instagram','url':'https://www.instagram.com/'}];
@@ -831,7 +839,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<Map<String, dynamic>> _readMatchHisaab(String matchId, String title) async {
-    final uri = Uri.parse('$kDbUrl/match_hisaab/$matchId.json?auth=${widget.token}');
+    final uri = Uri.parse('$kDbUrl/match_hisaab/$matchId.json?auth=${sessionToken}');
     final res = await http.get(uri);
     if (res.statusCode != 200) throw Exception('Match hisaab read nahi hua.');
     if (res.body == 'null') {
@@ -3545,7 +3553,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 5),
                   Text('Loaded permissions: ${_adminPermissions.entries.where((e) => e.value == true).map((e) => e.key).join(', ')}. Super Admin panel mein switches save karke yahan Reload Permissions dabao.', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   Align(alignment: Alignment.centerRight, child: TextButton.icon(
-                    onPressed: _sync,
+                    onPressed: () async { await _sync(); },
                     icon: const Icon(Icons.refresh),
                     label: const Text('Reload Permissions'),
                   )),
