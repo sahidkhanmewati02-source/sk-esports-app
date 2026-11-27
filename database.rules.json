@@ -61,13 +61,13 @@
       }
     },
     "deposits": {
-      ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+      ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (root.child('users').child(auth.uid).child('role').val() === 'coadmin' && root.child('adminPermissions').child(auth.uid).child('deposits_view').val() === true))",
       "$id": {
         ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('status').val() === 'PENDING'))"
       }
     },
     "withdrawals": {
-      ".read": "auth != null && auth.token.email === 'sahidkhanmewati02@gmail.com'",
+      ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (root.child('users').child(auth.uid).child('role').val() === 'coadmin' && root.child('adminPermissions').child(auth.uid).child('withdrawals_view').val() === true))",
       "$id": {
         ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('status').val() === 'PENDING' && newData.child('amt').val() >= 50))"
       }
