@@ -1864,6 +1864,58 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showVotingManagerDialog() {
+    if (!_can('voting_view') && !_can('voting_manage')) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Voting & Admin Picks'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 430,
+          child: _matches.isEmpty
+              ? const Center(child: Text('Abhi koi match available nahi hai.'))
+              : ListView.builder(
+                  itemCount: _matches.length,
+                  itemBuilder: (_, index) {
+                    final match = _matches[index];
+                    return Card(
+                      child: ListTile(
+                        title: Text((match['title'] ?? 'Match').toString()),
+                        subtitle: Text('${match['map'] ?? '-'} • ${match['mode'] ?? '-'}'),
+                        trailing: Wrap(
+                          spacing: 4,
+                          children: [
+                            if (_can('voting_view') || _can('matches_view'))
+                              IconButton(
+                                tooltip: 'View Admin Picks',
+                                icon: const Icon(Icons.leaderboard, color: Color(0xFFFF9800)),
+                                onPressed: () {
+                                  Navigator.pop(ctx);
+                                  _showAdminSelectionLeaderboard(match);
+                                },
+                              ),
+                            if (_can('voting_manage'))
+                              IconButton(
+                                tooltip: 'Configure Voting Admins',
+                                icon: const Icon(Icons.how_to_vote, color: Colors.lightBlueAccent),
+                                onPressed: () {
+                                  Navigator.pop(ctx);
+                                  _configureMatchVotingAdmins(match);
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
   Widget _adminQuickActions() {
     final width = (MediaQuery.of(context).size.width - 44) / 3;
     final completed = _matches.where((dynamic m) => m is Map && _isMatchCompleted(m)).map((dynamic m) => m as Map).toList()
@@ -1879,6 +1931,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (_can('players_view')) SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
           if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog)),
           if (_can('matches_manage')) SizedBox(width: width, child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
+          if (_can('voting_view') || _can('voting_manage')) SizedBox(width: width, child: _quickAction(Icons.how_to_vote, 'Voting', null, _showVotingManagerDialog)),
           if (_can('matches_view')) SizedBox(width: width, child: _quickAction(Icons.check_circle, 'Completed', completed.length, () => _showCompletedMatchesDialog(completed), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
         ],
       ),
@@ -3423,7 +3476,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ]),
       _walletPage(),
       ListView(padding: const EdgeInsets.all(16), children: [
-        Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}'))),
+        Card(child: ListTile(title: Text(_ign), subtitle: Text('BGMI ID: $_bgmiId\n${widget.email}\nAccount Access: ${isSuperAdmin ? 'SUPER ADMIN' : (_isCoAdmin ? 'CO-ADMIN' : 'PLAYER')}'))),
 
         Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('RULES:\n$_rulesText'))),
         ..._aboutLinks.map((link) => Padding(padding: const EdgeInsets.only(bottom: 7), child: OutlinedButton.icon(onPressed: () async { final uri = Uri.tryParse(link['url'].toString()); if (uri != null && !await launchUrl(uri, mode: LaunchMode.externalApplication)) { await Clipboard.setData(ClipboardData(text: link['url'].toString())); _msg('Link copied!'); } }, icon: const Icon(Icons.open_in_new), label: Text(link['label'].toString())))),
