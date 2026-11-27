@@ -356,7 +356,7 @@ class _AuthScreenState extends State<AuthScreen> {
               padding: const EdgeInsets.all(20),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Image.asset(
-                  'assets/sk_esports_selected.webp',
+                  'assets/sk_esports_logo.png',
                   width: 250,
                   height: 250,
                   fit: BoxFit.contain,
