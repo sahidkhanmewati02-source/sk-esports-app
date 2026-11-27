@@ -348,13 +348,26 @@ class _AuthScreenState extends State<AuthScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFFFF9800))));
     }
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
+      backgroundColor: const Color(0xFF0D0718),
+      body: SizedBox.expand(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              'assets/sk_esports_logo.png',
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
+            ),
+            Container(color: Colors.black.withOpacity(0.16)),
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Card(
+                  color: const Color(0xCC17121D),
+                  elevation: 12,
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text(_isLogin ? 'Player Login' : 'Create Account', style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 14),
                 if (!_isLogin) ...[
@@ -403,9 +416,12 @@ class _AuthScreenState extends State<AuthScreen> {
                   onPressed: () => setState(() => _isLogin = !_isLogin),
                   child: Text(_isLogin ? 'New Player? Sign Up' : 'Already have account? Login'),
                 ),
-              ]),
+                    ]),
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
