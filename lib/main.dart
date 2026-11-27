@@ -1799,12 +1799,12 @@ class _HomeScreenState extends State<HomeScreen> {
             final amt = _num(liveDeposit['amt']);
             if (amt <= 0) return _msg('Deposit amount invalid hai.');
             Navigator.pop(ctx);
-            final txnId = DateTime.now().microsecondsSinceEpoch.toString();
+            final txnId = (d['id'] ?? DateTime.now().microsecondsSinceEpoch.toString()).toString();
             final now = DateTime.now();
             final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
             final patch = <String, dynamic>{
               'users/$uid/wallet': _num(u['wallet']) + amt,
-              'users/$uid/txns/$txnId': {'title': 'Wallet Deposit', 'sub': 'UTR: ${d['utr']} • $dt', 'amt': amt, 'status': 'APPROVED', 'time': dt},
+              'users/$uid/txns/$txnId': {'title': 'Wallet Deposit', 'sub': 'UTR: ${d['utr']} • $dt', 'amt': amt, 'status': 'APPROVED', 'time': dt, 'createdAt': now.millisecondsSinceEpoch},
               'deposits/${d['id']}/status': 'APPROVED',
               'deposits/${d['id']}/approvedAt': DateTime.now().millisecondsSinceEpoch,
             };
@@ -1949,14 +1949,12 @@ class _HomeScreenState extends State<HomeScreen> {
         spacing: 6,
         runSpacing: 8,
         children: [
-          tile(_quickAction(Icons.sports_esports, 'Matches', _matches.length, () => _runCoAdminAction('matches_view', () => setState(() => _tab = 0)))),
+          if (isSuperAdmin) tile(_quickAction(Icons.admin_panel_settings, 'Co-Admin', _users.where((u) => u['role'] == 'coadmin').length, _showCoAdminDialog)),
           tile(_quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, () => _runCoAdminAction('deposits_view', _showPendingDepositsDialog))),
           tile(_quickAction(Icons.payments, 'Withdrawals', _withs.length, () => _runCoAdminAction('withdrawals_view', _showPendingWithdrawalsDialog))),
           tile(_quickAction(Icons.groups, 'All Players', _users.length, () => _runCoAdminAction('players_view', _showAllPlayersDialog))),
           tile(_quickAction(Icons.add, '+ Create', null, () => _runCoAdminAction('matches_manage', _addMatch))),
-          tile(_quickAction(Icons.how_to_vote, 'Voting', null, () => _runCoAdminAction('voting_view', _showVotingManagerDialog))),
           tile(_quickAction(Icons.check_circle, 'Completed', completed.length, () => _runCoAdminAction('matches_view', () => _showCompletedMatchesDialog(completed)), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
-          tile(_quickAction(Icons.chat, 'Chat Tools', null, () => _runCoAdminAction('chat_moderate', () => setState(() => _tab = 2)))),
         ],
       ),
     );
@@ -2978,6 +2976,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             'ign': _ign,
                             'amt': amt,
                             'utr': utr,
+                            'status': 'PENDING',
+                            'createdAt': now,
+                          },
+                          'users/${widget.uid}/txns/$depositId': {
+                            'title': 'Wallet Deposit',
+                            'sub': 'UTR: $utr • Submitted',
+                            'amt': amt,
                             'status': 'PENDING',
                             'createdAt': now,
                           },
