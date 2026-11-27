@@ -32,12 +32,12 @@
     "matches": {
       ".read": "auth != null",
       "$matchId": {
-        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (root.child('users').child(auth.uid).child('role').val() === 'coadmin' && root.child('adminPermissions').child(auth.uid).child('matches_manage').val() === true))",
         "players": {
           "$uid": {
-            ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || (auth.uid === $uid && !data.exists() && ((root.child('matches').child($matchId).child('mode').val() === 'SQUAD' && newData.child('teamSize').val() === 4) || (root.child('matches').child($matchId).child('mode').val() === 'DUO' && newData.child('teamSize').val() === 2) || (root.child('matches').child($matchId).child('mode').val() !== 'SQUAD' && root.child('matches').child($matchId).child('mode').val() !== 'DUO' && newData.child('teamSize').val() === 1)) && newData.child('baseFee').val() === root.child('matches').child($matchId).child('fee').val() * newData.child('teamSize').val() && newData.child('feePaid').val() === newData.child('baseFee').val() && (root.child('matches').child($matchId).child('adminSelectionEnabled').val() !== true || (newData.child('selectedAdminUid').isString() && newData.child('selectedAdminUid').val().length > 0 && root.child('matches').child($matchId).child('votingAdmins').hasChildren()))))",
+            ".write": "auth != null && ((auth.token.email === 'sahidkhanmewati02@gmail.com') || (root.child('users').child(auth.uid).child('role').val() === 'coadmin' && root.child('adminPermissions').child(auth.uid).child('matches_manage').val() === true) || (auth.uid === $uid && !data.exists() && ((root.child('matches').child($matchId).child('mode').val() === 'SQUAD' && newData.child('teamSize').val() === 4) || (root.child('matches').child($matchId).child('mode').val() === 'DUO' && newData.child('teamSize').val() === 2) || (root.child('matches').child($matchId).child('mode').val() !== 'SQUAD' && root.child('matches').child($matchId).child('mode').val() !== 'DUO' && newData.child('teamSize').val() === 1)) && newData.child('baseFee').val() === root.child('matches').child($matchId).child('fee').val() * newData.child('teamSize').val() && newData.child('feePaid').val() === newData.child('baseFee').val() && (root.child('matches').child($matchId).child('adminSelectionEnabled').val() !== true || (newData.child('selectedAdminUid').isString() && newData.child('selectedAdminUid').val().length > 0 && root.child('matches').child($matchId).child('votingAdmins').hasChildren()))))",
             "slotNumber": {
-              ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
+              ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (root.child('users').child(auth.uid).child('role').val() === 'coadmin' && root.child('adminPermissions').child(auth.uid).child('matches_manage').val() === true))",
               ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() % 1 === 0"
             },
             "members": {
@@ -49,7 +49,7 @@
           }
         },
         "joined": {
-          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || (newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1 && newData.val() <= root.child('matches').child($matchId).child('slots').val()))"
+          ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (root.child('users').child(auth.uid).child('role').val() === 'coadmin' && root.child('adminPermissions').child(auth.uid).child('matches_manage').val() === true) || (newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1 && newData.val() <= root.child('matches').child($matchId).child('slots').val()))"
         }
       }
     },
@@ -84,13 +84,19 @@
       ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')",
       "$uid": {
         ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin' || auth.uid === $uid)",
-        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'coadmin')"
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (root.child('users').child(auth.uid).child('role').val() === 'coadmin' && root.child('adminPermissions').child(auth.uid).child('chat_moderate').val() === true))"
       }
     },
     "chat": {
       ".read": "auth != null",
       "$messageId": {
         ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('role').val() === (root.child('users').child(auth.uid).child('role').val() === 'coadmin' ? 'coadmin' : 'player')))"
+      }
+    },
+    "adminPermissions": {
+      ".read": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val() || auth.uid === $uid)",
+      "$uid": {
+        ".write": "auth != null && (auth.token.email === 'sahidkhanmewati02@gmail.com' || auth.uid === root.child('config').child('superAdminUid').val())"
       }
     }
   }
