@@ -1044,9 +1044,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 _hisaabRow('Prize Sent', prize, const Color(0xFFFF9800)),
                 _hisaabRow('Match Expenses', _matchExpenses(data), Colors.redAccent),
                 const Divider(),
-                _hisaabRow('Net Profit', profit - _matchExpenses(data), profit - _matchExpenses(data) >= 0 ? const Color(0xFF00E676) : Colors.redAccent),
-                _hisaabRow('Admins Pool • 25%', (profit - _matchExpenses(data)) > 0 ? ((profit - _matchExpenses(data)) * 0.25).round() : 0, Colors.amber),
-                _hisaabRow('SK eSports Share • 75%', (profit - _matchExpenses(data)) > 0 ? ((profit - _matchExpenses(data)) * 0.75).round() : 0, const Color(0xFF00E676)),
+                _hisaabRow('Net Profit', profit, profit >= 0 ? const Color(0xFF00E676) : Colors.redAccent),
+                _hisaabRow('Admins Pool • 25%', profit > 0 ? (profit * 0.25).round() : 0, Colors.amber),
+                _hisaabRow('SK eSports Share • 75%', profit > 0 ? (profit * 0.75).round() : 0, const Color(0xFF00E676)),
                 if (transferredAmount > 0) _hisaabRow('Already Transferred', transferredAmount, Colors.lightBlueAccent),
                 if (available > 0 && transferredAmount > 0) _hisaabRow('Available to Transfer', available, const Color(0xFF00E676)),
                 if (data['transferred'] == true && available <= 0)
@@ -3290,8 +3290,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 final exactIgn = (selectedRoster['ign'] ?? latestUser['ign'] ?? 'Player').toString();
                 await _saveTxn(uid, bal, noteC.text.trim(), 'SK ESPORTS Admin • ${chosen['title']} • $exactIgn', add, 'CREDITED');
                 await _addMatchPrize(selectedId, chosen['title'].toString(), add);
-                _msg('₹$add prize $exactIgn (UID matched) ke wallet mein credit ho gaya.');
-                await _sync();
+                if (mounted) {
+                  setState(() {
+                    final userIndex = _users.indexWhere((x) => (x['uid'] ?? '').toString() == uid);
+                    if (userIndex >= 0) _users[userIndex] = {..._users[userIndex], 'wallet': bal};
+                  });
+                  _msg('₹$add prize $exactIgn (UID matched) ke wallet mein credit ho gaya.');
+                }
               } catch (e) { _msg(e.toString().replaceAll('Exception: ', '')); }
             },
             child: const Text('Send', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -3470,68 +3475,60 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text('Join: ${_isMatchCompleted(m) ? 'COMPLETED' : (closed ? 'CLOSED' : 'OPEN')} • Room: ${m['hold'] == true ? 'HOLD' : (roomReady ? 'RELEASED' : '15 min before match')}', style: const TextStyle(fontSize: 11, color: Colors.amber)),
                 if (joined || isAdmin) ...[
                   const SizedBox(height: 8),
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    ElevatedButton(
-                      onPressed: () => _showRoomAfterAd(m),
-                      child: const Text('View Room ID / Pass'),
-                    ),
-                    if (isSuperAdmin) ...[
-                      IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
-                      IconButton(icon: const Icon(Icons.schedule, color: Colors.lightBlueAccent), onPressed: () => _editMatchTiming(m)),
-                      IconButton(icon: Icon(m['hold'] == true ? Icons.play_arrow : Icons.pause, color: Colors.amber), onPressed: () => _toggleMatchHold(m)),
-                    ],
-                  ]),
-                ],
-                const SizedBox(height: 8),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-
-                                      if (isSuperAdmin) ...[
+                  if (isSuperAdmin) ...[
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () => _showPlayers(m),
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), minimumSize: Size.zero),
+                        child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                      ),
+                      if (_can('voting_manage')) OutlinedButton.icon(
+                        onPressed: () => _configureMatchVotingAdmins(m),
+                        icon: const Icon(Icons.how_to_vote, size: 14),
+                        label: Text(m['adminSelectionEnabled'] == true ? 'Edit Voting Admins' : 'Set Voting Admins', style: const TextStyle(fontSize: 11)),
+                      ),
+                      if (_can('voting_view') || _can('matches_view'))
+                        OutlinedButton(onPressed: () => _showAdminSelectionLeaderboard(m), child: const Text('Admin Picks', style: TextStyle(fontSize: 11))),
+                      if (_can('matches_manage') && !_isMatchCompleted(m))
                         OutlinedButton(
-                          onPressed: () => _showPlayers(m),
-                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
-                          child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
-                        ),
-                        const SizedBox(width: 6),
-                        if (_can('voting_manage')) OutlinedButton.icon(
-                          onPressed: () => _configureMatchVotingAdmins(m),
-                          icon: const Icon(Icons.how_to_vote, size: 14),
-                          label: Text(m['adminSelectionEnabled'] == true ? 'Edit Voting Admins' : 'Set Voting Admins', style: const TextStyle(fontSize: 11)),
-                        ),
-                        const SizedBox(width: 6),
-                        if (_can('voting_view') || _can('matches_view')) OutlinedButton(onPressed: () => _showAdminSelectionLeaderboard(m), child: const Text('Admin Picks', style: TextStyle(fontSize: 11))),
-                        const SizedBox(width: 6),
-                        if (_can('matches_manage') && !_isMatchCompleted(m)) OutlinedButton(
                           onPressed: () => _markMatchCompleted(m),
-                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), minimumSize: Size.zero, foregroundColor: const Color(0xFF00E676)),
+                          style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF00E676)),
                           child: const Text('Complete', style: TextStyle(fontSize: 11)),
                         ),
-                        const SizedBox(width: 6),
-                        if (isSuperAdmin) OutlinedButton.icon(
-                          onPressed: () => _showMatchHisaab(m),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF00E676),
-                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                            minimumSize: Size.zero,
-                            side: const BorderSide(color: Color(0xFF00E676)),
-                          ),
-                          icon: const Icon(Icons.account_balance_wallet, size: 14),
-                          label: const Text('₹ Hisaab', style: TextStyle(fontSize: 11)),
+                      OutlinedButton.icon(
+                        onPressed: () => _showMatchHisaab(m),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF00E676),
+                          side: const BorderSide(color: Color(0xFF00E676)),
                         ),
-                      ],
-                      const Spacer(),
-                      Text('${_matchPlayerCount(m)}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                  ElevatedButton( 
-
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
-                    ),
-                    onPressed: (joined || isFull || closed || isSuperAdmin) ? null : () => _startJoinAd(m),
-                    child: Text(
-                      joined ? 'JOINED ✓${_slotNumberFor(m, widget.uid) > 0 ? '  •  SLOT #${_slotNumberFor(m, widget.uid)}' : ''}' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isSuperAdmin ? 'SUPER ADMIN' : 'Join ₹${m['fee']}'))),
-                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                    ),
+                        icon: const Icon(Icons.account_balance_wallet, size: 14),
+                        label: const Text('₹ Hisaab', style: TextStyle(fontSize: 11)),
+                      ),
+                    ],
                   ),
-                ]),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text('${_matchPlayerCount(m)}/${m['slots']} Joined', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: joined ? const Color(0xFF00E676) : const Color(0xFFFF9800),
+                      ),
+                      onPressed: (joined || isFull || closed || isSuperAdmin) ? null : () => _startJoinAd(m),
+                      child: Text(
+                        joined ? 'JOINED ✓${_slotNumberFor(m, widget.uid) > 0 ? '  •  SLOT #${_slotNumberFor(m, widget.uid)}' : ''}' : (closed ? 'CLOSED' : (isFull ? 'FULL' : (isSuperAdmin ? 'SUPER ADMIN' : 'Join ₹${m['fee']}'))),
+                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+
               ]),
             ),
           );
