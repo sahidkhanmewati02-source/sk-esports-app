@@ -17,6 +17,28 @@ jobs:
 
       - run: flutter create . --platforms=android
 
+      - name: Generate SK ESPORTS launcher icons
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          mkdir -p /tmp/sk-icon
+          for spec in "mipmap-mdpi 48" "mipmap-hdpi 72" "mipmap-xhdpi 96" "mipmap-xxhdpi 144" "mipmap-xxxhdpi 192"; do
+            set -- $spec
+            dir="android/app/src/main/res/$1"
+            size="$2"
+            mkdir -p "$dir"
+            convert -background none assets/sk_esports_icon.svg -resize "${size}x${size}" "$dir/ic_launcher.png"
+            cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
+          done
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          python3 - <<'PY'
+          p = "android/app/src/main/AndroidManifest.xml"
+          s = open(p, encoding="utf-8").read()
+          s = s.replace(' android:roundIcon="@mipmap/ic_launcher_round"', '')
+          open(p, "w", encoding="utf-8").write(s)
+          PY
+
       - name: Add internet permission
         run: |
           python3 - <<'PY'
