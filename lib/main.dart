@@ -3351,14 +3351,18 @@ class _HomeScreenState extends State<HomeScreen> {
     final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
     final showAutoAd = _autoBannerAdEnabled && _adsterraBannerCode.trim().isNotEmpty;
     final showBanner = showPromo;
-    // Admin tools belong only inside the Admin tab, never on the Matches home.
-    final leadingItems = showBanner ? 1 : 0;
+    // Restore Super Admin dashboard shortcuts above Matches; Co-Admin tools stay in Admin tab.
+    final showSuperAdminShortcuts = isSuperAdmin;
+    final leadingItems = (showBanner ? 1 : 0) + (showSuperAdminShortcuts ? 1 : 0);
     final pages = [
       Column(children: [
         Expanded(child: ListView.builder(
         padding: const EdgeInsets.all(12),
         itemCount: _matches.length + leadingItems,
         itemBuilder: (_, i) {
+          if (showSuperAdminShortcuts && i == (showPromo ? 1 : 0)) {
+            return _adminQuickActions();
+          }
           if (showPromo && i == 0) {
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
@@ -3424,7 +3428,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: () => _showRoomAfterAd(m),
                       child: const Text('View Room ID / Pass'),
                     ),
-                    if (_can('matches_manage')) ...[
+                    if (isSuperAdmin) ...[
                       IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
                       IconButton(icon: const Icon(Icons.schedule, color: Colors.lightBlueAccent), onPressed: () => _editMatchTiming(m)),
                       IconButton(icon: Icon(m['hold'] == true ? Icons.play_arrow : Icons.pause, color: Colors.amber), onPressed: () => _toggleMatchHold(m)),
@@ -3434,7 +3438,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 8),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
 
-                                      if (_can('matches_view')) ...[
+                                      if (isSuperAdmin) ...[
                         OutlinedButton(
                           onPressed: () => _showPlayers(m),
                           style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
