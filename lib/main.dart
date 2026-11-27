@@ -745,27 +745,32 @@ class _HomeScreenState extends State<HomeScreen> {
         final chats = <Map>[];
         if (chatRes.statusCode == 200 && chatRes.body != 'null') (jsonDecode(chatRes.body) as Map).forEach((k, v) { if (v is Map) chats.add({...v, 'id': k}); });
         _chatMessages = chats;
-        final dRes = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
-        if (dRes.statusCode != 200) throw Exception('Deposits read failed (${dRes.statusCode}); records ko empty nahi maana gaya.');
-        final deps = [];
-        if (dRes.statusCode == 200 && dRes.body != 'null') {
-          (jsonDecode(dRes.body) as Map).forEach((k, v) {
-            if (v is Map && v['status'] == 'PENDING') deps.add({...v, 'id': k});
-          });
-        }
-        _deps = deps.reversed.toList();
+        // Deposits and withdrawals are Super Admin-only in the current
+        // Firebase rules. Do not let a Co-Admin trigger forbidden reads (401).
+        if (isSuperAdmin) {
+          final dRes = await http.get(Uri.parse('$kDbUrl/deposits.json?auth=${widget.token}'));
+          if (dRes.statusCode != 200) throw Exception('Deposits read failed (${dRes.statusCode}); records ko empty nahi maana gaya.');
+          final deps = [];
+          if (dRes.body != 'null') {
+            (jsonDecode(dRes.body) as Map).forEach((k, v) {
+              if (v is Map && v['status'] == 'PENDING') deps.add({...v, 'id': k});
+            });
+          }
+          _deps = deps.reversed.toList();
 
-        final wRes = await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));
-        if (wRes.statusCode != 200) throw Exception('Withdrawals read failed (${wRes.statusCode}); records ko empty nahi maana gaya.');
-        final withs = [];
-        if (wRes.statusCode == 200 && wRes.body != 'null') {
-          (jsonDecode(wRes.body) as Map).forEach((k, v) {
-            if (v is Map && (v['status'] ?? 'PENDING') == 'PENDING') {
-              withs.add({...v, 'id': k});
-            }
-          });
+          final wRes = await http.get(Uri.parse('$kDbUrl/withdrawals.json?auth=${widget.token}'));
+          if (wRes.statusCode != 200) throw Exception('Withdrawals read failed (${wRes.statusCode}); records ko empty nahi maana gaya.');
+          final withs = [];
+          if (wRes.body != 'null') {
+            (jsonDecode(wRes.body) as Map).forEach((k, v) {
+              if (v is Map && (v['status'] ?? 'PENDING') == 'PENDING') withs.add({...v, 'id': k});
+            });
+          }
+          _withs = withs.reversed.toList();
+        } else {
+          _deps = [];
+          _withs = [];
         }
-        _withs = withs.reversed.toList();
 
         final allRes = await http.get(Uri.parse('$kDbUrl/users.json?auth=${widget.token}'));
         if (allRes.statusCode != 200) throw Exception('All players read failed (${allRes.statusCode}); players ko empty nahi maana gaya.');
