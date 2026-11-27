@@ -3510,6 +3510,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  ],
                 ],
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
