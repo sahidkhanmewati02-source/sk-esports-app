@@ -1382,10 +1382,11 @@ class _HomeScreenState extends State<HomeScreen> {
             actions: [
               IconButton(
                 tooltip: 'Refresh Finance',
-                onPressed: loading ? null : () { reloadFinance(); },
-                icon: loading
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.refresh_rounded),
+                // Keep this as a permanent refresh icon. The Finance body has
+                // its own state builder; an AppBar spinner can otherwise stay
+                // visible because that nested builder does not rebuild AppBar.
+                onPressed: () { reloadFinance(); },
+                icon: const Icon(Icons.refresh_rounded),
               ),
             ],
           ),
