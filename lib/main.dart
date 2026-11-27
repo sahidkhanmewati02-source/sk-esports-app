@@ -1887,12 +1887,12 @@ class _HomeScreenState extends State<HomeScreen> {
         spacing: 6,
         runSpacing: 6,
         children: [
-          if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
-          if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
-          SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
+          if (_can('deposits_view')) SizedBox(width: width, child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
+          if (_can('withdrawals_view')) SizedBox(width: width, child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
+          if (_can('players_view')) SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
           if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog)),
-          SizedBox(width: width, child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
-          SizedBox(width: width, child: _quickAction(Icons.check_circle, 'Completed', completed.length, () => _showCompletedMatchesDialog(completed), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
+          if (_can('matches_manage')) SizedBox(width: width, child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
+          if (_can('matches_view')) SizedBox(width: width, child: _quickAction(Icons.check_circle, 'Completed', completed.length, () => _showCompletedMatchesDialog(completed), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
         ],
       ),
     );
@@ -3275,7 +3275,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
     final showAutoAd = _autoBannerAdEnabled && _adsterraBannerCode.trim().isNotEmpty;
     final showBanner = showPromo;
-    final showQuickActions = isAdmin;
+    final showQuickActions = isAdmin && (isSuperAdmin || _permissionLabels.keys.any(_can));
     final leadingItems = (showBanner ? 1 : 0) + (showQuickActions ? 1 : 0);
     final pages = [
       Column(children: [
@@ -3321,7 +3321,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                   ),
-                  if (isAdmin)
+                  if (_can('matches_manage'))
                     IconButton(
                       icon: const Icon(Icons.delete, color: Colors.redAccent),
                       onPressed: () async {
@@ -3350,7 +3350,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: () => _showRoomAfterAd(m),
                       child: const Text('View Room ID / Pass'),
                     ),
-                    if (isAdmin) ...[
+                    if (_can('matches_manage')) ...[
                       IconButton(icon: const Icon(Icons.edit, color: Color(0xFFFF9800)), onPressed: () => _editRoom(m)),
                       IconButton(icon: const Icon(Icons.schedule, color: Colors.lightBlueAccent), onPressed: () => _editMatchTiming(m)),
                       IconButton(icon: Icon(m['hold'] == true ? Icons.play_arrow : Icons.pause, color: Colors.amber), onPressed: () => _toggleMatchHold(m)),
@@ -3360,7 +3360,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 8),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
 
-                                      if (isAdmin) ...[
+                                      if (_can('matches_view')) ...[
                         OutlinedButton(
                           onPressed: () => _showPlayers(m),
                           style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
@@ -3375,7 +3375,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(width: 6),
                         OutlinedButton(onPressed: () => _showAdminSelectionLeaderboard(m), child: const Text('Admin Picks', style: TextStyle(fontSize: 11))),
                         const SizedBox(width: 6),
-                        if (!_isMatchCompleted(m)) OutlinedButton(
+                        if (_can('matches_manage') && !_isMatchCompleted(m)) OutlinedButton(
                           onPressed: () => _markMatchCompleted(m),
                           style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), minimumSize: Size.zero, foregroundColor: const Color(0xFF00E676)),
                           child: const Text('Complete', style: TextStyle(fontSize: 11)),
