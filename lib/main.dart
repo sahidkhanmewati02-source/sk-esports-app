@@ -1193,7 +1193,8 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton(onPressed: _withdraw, child: const Text('Withdraw'))),
           const SizedBox(width: 8),
-          IconButton(tooltip: 'UPI / QR', onPressed: isSuperAdmin ? _showPaymentSettingsDialog : _deposit, icon: const Icon(Icons.qr_code_2, color: Color(0xFFFF9800))),
+          if (!isAdmin) IconButton(tooltip: 'UPI / QR', onPressed: _deposit, icon: const Icon(Icons.qr_code_2, color: Color(0xFFFF9800))),
+          if (isSuperAdmin) IconButton(tooltip: 'Payment Settings', onPressed: _showPaymentSettingsDialog, icon: const Icon(Icons.settings, color: Color(0xFFFF9800))),
         ]),
         if (!isSuperAdmin) Row(children: [
           Expanded(child: _walletMetric('All-time Credits', '₹$credits', Icons.trending_up, const Color(0xFF00E676))),
@@ -1929,6 +1930,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _runCoAdminAction(String permission, VoidCallback action) {
+    if (!_can(permission)) {
+      _msg('Is option ki permission Super Admin se ON karwao.');
+      return;
+    }
+    action();
+  }
+
   Widget _adminQuickActions() {
     final width = (MediaQuery.of(context).size.width - 44) / 3;
     final completed = _matches.where((dynamic m) => m is Map && _isMatchCompleted(m)).map((dynamic m) => m as Map).toList()
@@ -1939,14 +1948,14 @@ class _HomeScreenState extends State<HomeScreen> {
         spacing: 6,
         runSpacing: 6,
         children: [
-          if (_can('matches_view')) SizedBox(width: width, child: _quickAction(Icons.sports_esports, 'Matches', _matches.length, () => setState(() => _tab = 0))),
-          if (_can('deposits_view')) SizedBox(width: width, child: _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, _showPendingDepositsDialog)),
-          if (_can('withdrawals_view')) SizedBox(width: width, child: _quickAction(Icons.payments, 'Withdrawals', _withs.length, _showPendingWithdrawalsDialog)),
-          if (_can('players_view')) SizedBox(width: width, child: _quickAction(Icons.groups, 'All Players', _users.length, _showAllPlayersDialog)),
-          if (isSuperAdmin) SizedBox(width: width, child: _quickAction(Icons.admin_panel_settings, 'Co-Admin', _activeCoAdminCount, _showCoAdminDialog)),
-          if (_can('matches_manage')) SizedBox(width: width, child: _quickAction(Icons.add, '+ Create', null, _addMatch)),
-          if (_can('voting_view') || _can('voting_manage')) SizedBox(width: width, child: _quickAction(Icons.how_to_vote, 'Voting', null, _showVotingManagerDialog)),
-          if (_can('matches_view')) SizedBox(width: width, child: _quickAction(Icons.check_circle, 'Completed', completed.length, () => _showCompletedMatchesDialog(completed), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676))),
+          _quickAction(Icons.sports_esports, 'Matches', _matches.length, () => _runCoAdminAction('matches_view', () => setState(() => _tab = 0))),
+          _quickAction(Icons.account_balance_wallet, 'Deposits', _deps.length, () => _runCoAdminAction('deposits_view', _showPendingDepositsDialog)),
+          _quickAction(Icons.payments, 'Withdrawals', _withs.length, () => _runCoAdminAction('withdrawals_view', _showPendingWithdrawalsDialog)),
+          _quickAction(Icons.groups, 'All Players', _users.length, () => _runCoAdminAction('players_view', _showAllPlayersDialog)),
+          _quickAction(Icons.add, '+ Create', null, () => _runCoAdminAction('matches_manage', _addMatch)),
+          _quickAction(Icons.how_to_vote, 'Voting', null, () => _runCoAdminAction('voting_view', _showVotingManagerDialog)),
+          _quickAction(Icons.check_circle, 'Completed', completed.length, () => _runCoAdminAction('matches_view', () => _showCompletedMatchesDialog(completed)), iconColor: const Color(0xFF00E676), badgeColor: const Color(0xFF00E676)),
+          _quickAction(Icons.chat, 'Chat Tools', null, () => _runCoAdminAction('chat_moderate', () => setState(() => _tab = 2))),
         ],
       ),
     );
@@ -3342,7 +3351,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final showPromo = _promoEnabled && _promoImageUrl.isNotEmpty;
     final showAutoAd = _autoBannerAdEnabled && _adsterraBannerCode.trim().isNotEmpty;
     final showBanner = showPromo;
-    final showQuickActions = isAdmin && (isSuperAdmin || _permissionLabels.keys.any(_can));
+    final showQuickActions = isAdmin;
     final leadingItems = (showBanner ? 1 : 0) + (showQuickActions ? 1 : 0);
     final pages = [
       Column(children: [
@@ -3524,9 +3533,9 @@ class _HomeScreenState extends State<HomeScreen> {
               Card(child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Abhi koi Co-Admin permission active nahi hai.', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('Abhi app mein koi Co-Admin permission active load nahi hui.', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 5),
-                  const Text('Super Admin se is account ke switches ON karwao, phir upar Refresh dabao.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  Text('Loaded permissions: ${_adminPermissions.entries.where((e) => e.value == true).map((e) => e.key).join(', ')}. Super Admin panel mein switches save karke yahan Reload Permissions dabao.', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   Align(alignment: Alignment.centerRight, child: TextButton.icon(
                     onPressed: _sync,
                     icon: const Icon(Icons.refresh),
