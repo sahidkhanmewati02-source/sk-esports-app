@@ -27,7 +27,7 @@ jobs:
             dir="android/app/src/main/res/$1"
             size="$2"
             mkdir -p "$dir"
-            convert -background none assets/sk_esports_icon.svg -resize "${size}x${size}" "$dir/ic_launcher.png"
+            convert assets/sk_esports_icon.png -resize "${size}x${size}" "$dir/ic_launcher.png"
             cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
           done
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
