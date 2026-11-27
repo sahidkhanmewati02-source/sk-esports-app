@@ -477,9 +477,12 @@ class _HomeScreenState extends State<HomeScreen> {
   static const Map<String, String> _permissionLabels = {
     'matches_view': 'Matches • View players and match details',
     'matches_manage': 'Matches • Create, edit, delete, room and hold',
+    'voting_view': 'Voting • View Admin Picks and voting results',
+    'voting_manage': 'Voting • Configure voting admins for matches',
     'players_view': 'Players • View player list and profiles',
     'deposits_view': 'Deposits • View deposit requests',
     'withdrawals_view': 'Withdrawals • View withdrawal requests',
+    'chat_moderate': 'Chat • Pin and delete messages',
   };
   bool _can(String key) => isSuperAdmin || (_isCoAdmin && _adminPermissions[key] == true);
   int _tab = 0, _wallet = 0;
@@ -784,15 +787,13 @@ class _HomeScreenState extends State<HomeScreen> {
           _withs = withs.reversed.toList();
         } else { _withs = []; }
 
-        final allRes = await http.get(Uri.parse('$kDbUrl/users.json?auth=${widget.token}'));
-        if (allRes.statusCode != 200) throw Exception('All players read failed (${allRes.statusCode}); players ko empty nahi maana gaya.');
-        final usrs = [];
-        if (allRes.statusCode == 200 && allRes.body != 'null') {
-          (jsonDecode(allRes.body) as Map).forEach((k, v) {
-            if (v is Map) usrs.add({...v, 'uid': k});
-          });
-        }
-        _users = usrs;
+        if (isSuperAdmin || _can('players_view')) {
+          final allRes = await http.get(Uri.parse('$kDbUrl/users.json?auth=${widget.token}'));
+          if (allRes.statusCode != 200) throw Exception('All players read failed (${allRes.statusCode}); players ko empty nahi maana gaya.');
+          final usrs = [];
+          if (allRes.body != 'null') (jsonDecode(allRes.body) as Map).forEach((k, v) { if (v is Map) usrs.add({...v, 'uid': k}); });
+          _users = usrs;
+        } else { _users = []; }
         if (isSuperAdmin) await _refreshAdminDirectory();
       } else {
         final chatRes = await http.get(Uri.parse('$kDbUrl/chat.json?auth=${widget.token}'));
@@ -2283,6 +2284,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (res.statusCode >= 200 && res.statusCode < 300) { _chatC.clear(); await _loadChat(); } else { _msg('Message send nahi hua. Firebase Rules check karein.'); }
   }
   Future<void> _chatAction(Map m, String action) async {
+    if (!_can('chat_moderate')) return _msg('Chat moderation permission nahi hai.');
     final path = '$kDbUrl/chat/' + m['id'].toString() + '.json?auth=' + widget.token;
     final res = action == 'delete' ? await http.delete(Uri.parse(path)) : await http.patch(Uri.parse(path), body: jsonEncode({'pinned': m['pinned'] != true}));
     if (res.statusCode >= 200 && res.statusCode < 300) await _loadChat(); else _msg('Chat action failed. Firebase Rules check karein.');
@@ -2303,7 +2305,7 @@ class _HomeScreenState extends State<HomeScreen> {
           leading: CircleAvatar(child: Text(ign.isNotEmpty ? ign[0].toUpperCase() : 'P')),
           title: Row(children: [Expanded(child: Text(ign, style: const TextStyle(fontWeight: FontWeight.bold))), if (m['pinned'] == true) const Icon(Icons.push_pin, color: Colors.amber, size: 16)]),
           subtitle: Text(m['message']?.toString() ?? ''),
-          trailing: isSuperAdmin ? PopupMenuButton<String>(onSelected: (v) => _chatAction(m, v), itemBuilder: (_) => [PopupMenuItem(value: 'pin', child: Text(m['pinned'] == true ? 'Unpin' : 'Pin')), const PopupMenuItem(value: 'delete', child: Text('Delete'))]) : null,
+          trailing: _can('chat_moderate') ? PopupMenuButton<String>(onSelected: (v) => _chatAction(m, v), itemBuilder: (_) => [PopupMenuItem(value: 'pin', child: Text(m['pinned'] == true ? 'Unpin' : 'Pin')), const PopupMenuItem(value: 'delete', child: Text('Delete'))]) : null,
         ));
       })),
       SafeArea(child: Padding(padding: const EdgeInsets.all(10), child: Row(children: [Expanded(child: TextField(controller: _chatC, minLines: 1, maxLines: 4, decoration: const InputDecoration(hintText: 'Message as BGMI IGN', border: OutlineInputBorder()))), const SizedBox(width: 8), IconButton(onPressed: _sendChat, icon: const Icon(Icons.send, color: Color(0xFFFF9800)))]))),
@@ -2578,7 +2580,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _configureMatchVotingAdmins(Map match) async {
-    if (!isSuperAdmin) return _msg('Voting Admins sirf Super Admin set kar sakta hai.');
+    if (!_can('voting_manage')) return _msg('Voting manage permission nahi hai.');
     List<Map<String,dynamic>> available;
     try {
       available = await _loadRegisteredAdmins();
@@ -3361,13 +3363,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
                         ),
                         const SizedBox(width: 6),
-                        if (isSuperAdmin) OutlinedButton.icon(
+                        if (_can('voting_manage')) OutlinedButton.icon(
                           onPressed: () => _configureMatchVotingAdmins(m),
                           icon: const Icon(Icons.how_to_vote, size: 14),
                           label: Text(m['adminSelectionEnabled'] == true ? 'Edit Voting Admins' : 'Set Voting Admins', style: const TextStyle(fontSize: 11)),
                         ),
                         const SizedBox(width: 6),
-                        OutlinedButton(onPressed: () => _showAdminSelectionLeaderboard(m), child: const Text('Admin Picks', style: TextStyle(fontSize: 11))),
+                        if (_can('voting_view') || _can('matches_view')) OutlinedButton(onPressed: () => _showAdminSelectionLeaderboard(m), child: const Text('Admin Picks', style: TextStyle(fontSize: 11))),
                         const SizedBox(width: 6),
                         if (_can('matches_manage') && !_isMatchCompleted(m)) OutlinedButton(
                           onPressed: () => _markMatchCompleted(m),
@@ -3438,6 +3440,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _chatPage(),
       if (isAdmin)
         ListView(padding: const EdgeInsets.all(14), children: [
+          if (_isCoAdmin) ...[
+            const Text('CO-ADMIN CONTROL PANEL', style: TextStyle(color: Color(0xFFFF9800), fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 10),
+            _adminQuickActions(),
+            if (_can('voting_view') || _can('matches_view')) const Text('Admin Picks and player results are available from each match card.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            const Divider(),
+          ],
           if (isSuperAdmin) ...[
 
           ],
