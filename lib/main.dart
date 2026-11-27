@@ -849,13 +849,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<Map<String, dynamic>> _readMatchHisaab(String matchId, String title) async {
-    final uri = Uri.parse('$kDbUrl/match_hisaab/$matchId.json?auth=${sessionToken}');
-    final res = await http.get(uri);
-    if (res.statusCode != 200) throw Exception('Match hisaab read nahi hua.');
+    final token = await _freshAdminToken();
+    final uri = Uri.parse('$kDbUrl/match_hisaab/${Uri.encodeComponent(matchId)}.json')
+        .replace(queryParameters: {'auth': token});
+    final res = await http.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) throw Exception('Match hisaab read nahi hua (HTTP ${res.statusCode}).');
     if (res.body == 'null') {
       final fresh = <String, dynamic>{'title': title, 'collection': 0, 'prizeSent': 0, 'settled': false, 'status': 'OPEN', 'updatedAt': DateTime.now().millisecondsSinceEpoch};
-      final put = await http.put(uri, body: jsonEncode(fresh));
-      if (put.statusCode < 200 || put.statusCode >= 300) throw Exception('Match hisaab create nahi hua.');
+      final put = await http.put(uri, body: jsonEncode(fresh)).timeout(const Duration(seconds: 15));
+      if (put.statusCode < 200 || put.statusCode >= 300) throw Exception('Match hisaab create nahi hua (HTTP ${put.statusCode}).');
       return fresh;
     }
     return Map<String, dynamic>.from(jsonDecode(res.body) as Map);
