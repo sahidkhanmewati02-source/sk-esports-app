@@ -356,7 +356,7 @@ class _AuthScreenState extends State<AuthScreen> {
               padding: const EdgeInsets.all(20),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 SvgPicture.asset(
-                  'assets/sk_login_logo.svg',
+                  'assets/sk_esports_icon.svg',
                   width: 270,
                   height: 170,
                   fit: BoxFit.contain,
