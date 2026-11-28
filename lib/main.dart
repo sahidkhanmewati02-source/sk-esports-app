@@ -1251,7 +1251,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 
   Widget _walletPage() {
-    final creditedStatuses = {'CREDITED','APPROVED','SUCCESS','COMPLETED'};
+    final creditedStatuses = {'CREDITED','APPROVED','SUCCESS','COMPLETED','REFUNDED'};
     final debitStatuses = {'DEBITED','WITHDRAWN','WITHDRAWAL'};
     int credits = 0, debits = 0, monthCredits = 0;
     final now = DateTime.now();
@@ -1992,31 +1992,111 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showPendingWithdrawalsDialog() {
     if (!_can('withdrawals_view')) return _msg('Withdrawals dekhne ki permission nahi hai.');
     showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: Text('Pending Withdrawals (${_withs.length})', style: const TextStyle(fontSize: 15)),
-      content: SizedBox(width: double.maxFinite, height: 350, child: _withs.isEmpty ? const Center(child: Text('Koi pending withdrawal nahi hai')) : ListView.builder(itemCount: _withs.length, itemBuilder: (_, i) {
+      title: Text('Pending Withdrawals (\${_withs.length})', style: const TextStyle(fontSize: 15)),
+      content: SizedBox(width: double.maxFinite, height: 390, child: _withs.isEmpty ? const Center(child: Text('Koi pending withdrawal nahi hai')) : ListView.builder(itemCount: _withs.length, itemBuilder: (_, i) {
         final wd = _withs[i];
-        return Card(child: ListTile(title: Text('${wd['ign']} • ₹${wd['amt']}'), subtitle: Text('UPI: ${wd['upi']}'), trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          IconButton(icon: const Icon(Icons.copy, color: Colors.lightBlueAccent), onPressed: () { Clipboard.setData(ClipboardData(text: '${wd['upi']}')); _msg('Player UPI Copied!'); }),
-          if (isSuperAdmin) IconButton(icon: const Icon(Icons.check_circle, color: Color(0xFF00E676)), onPressed: () async {
-            Navigator.pop(ctx);
-            final uid = wd['uid'].toString();
-            final u = _users.firstWhere((e) => e['uid'] == uid, orElse: () => {});
-            final amt = _num(wd['amt']);
-            if (u.isEmpty || _num(u['wallet']) < amt) return _msg('Player wallet balance insufficient hai.');
-            final txnId = DateTime.now().microsecondsSinceEpoch.toString();
-            final now = DateTime.now();
-            final dt = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-            final patch = <String, dynamic>{
-              'users/$uid/wallet': _num(u['wallet']) - amt,
-              'users/$uid/txns/$txnId': {'title': 'UPI Withdrawal', 'sub': wd['upi'].toString() + ' • $dt', 'amt': amt, 'status': 'PAID', 'time': dt},
-              'withdrawals/${wd['id']}/status': 'PAID',
-              'withdrawals/${wd['id']}/approvedAt': now.millisecondsSinceEpoch,
-            };
-            final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
-            if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Withdrawal approval fail hui. Firebase Rules check karein.');
-            _msg('Marked Paid; wallet deduction aur txn save hue.'); _sync();
-          }),
-        ])));
+        return Card(child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('\${wd['ign']} • ₹\${wd['amt']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 3),
+            SelectableText('UPI: \${wd['upi']}'),
+            const SizedBox(height: 6),
+            Wrap(spacing: 4, children: [
+              TextButton.icon(
+                onPressed: () { Clipboard.setData(ClipboardData(text: '\${wd['upi']}')); _msg('Player UPI Copied!'); },
+                icon: const Icon(Icons.copy, color: Colors.lightBlueAccent, size: 18),
+                label: const Text('Copy UPI'),
+              ),
+              if (isSuperAdmin) TextButton.icon(
+                onPressed: () async {
+                  final uid = (wd['uid'] ?? '').toString();
+                  final id = (wd['id'] ?? '').toString();
+                  final amt = _num(wd['amt']);
+                  if (uid.isEmpty || id.isEmpty || amt <= 0) return _msg('Withdrawal record incomplete hai.');
+                  final txnId = (wd['txnId'] ?? id).toString();
+                  final now = DateTime.now();
+                  final dt = '\${now.day.toString().padLeft(2, '0')}/\${now.month.toString().padLeft(2, '0')}/\${now.year} \${now.hour.toString().padLeft(2, '0')}:\${now.minute.toString().padLeft(2, '0')}';
+                  final patch = <String, dynamic>{
+                    'withdrawals/$id/status': 'SUCCESS',
+                    'withdrawals/$id/approvedAt': now.millisecondsSinceEpoch,
+                    'withdrawals/$id/processedBy': widget.uid,
+                    'users/$uid/txns/$txnId/status': 'WITHDRAWN',
+                    'users/$uid/txns/$txnId/title': 'UPI Withdrawal',
+                    'users/$uid/txns/$txnId/sub': '\${wd['upi']} • $dt',
+                  };
+                  // Old requests were not debited on submission; debit those once on approval.
+                  if (wd['walletDebited'] != true) {
+                    final walletRes = await http.get(Uri.parse('$kDbUrl/users/$uid/wallet.json?auth=\${widget.token}'));
+                    if (walletRes.statusCode != 200) return _msg('Player wallet read nahi hua; approval nahi ki.');
+                    final balance = _num(jsonDecode(walletRes.body));
+                    if (balance < amt) return _msg('Player wallet balance insufficient hai.');
+                    patch['users/$uid/wallet'] = balance - amt;
+                    patch['users/$uid/txns/$txnId'] = {
+                      'title': 'UPI Withdrawal', 'sub': '\${wd['upi']} • $dt',
+                      'amt': amt, 'status': 'WITHDRAWN', 'time': dt,
+                      'createdAt': now.millisecondsSinceEpoch,
+                    };
+                  }
+                  final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=\${widget.token}'), body: jsonEncode(patch));
+                  if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Approval fail hui (HTTP \${res.statusCode}).');
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  _msg('Withdrawal Success! Wallet se dobara deduction nahi hui.');
+                  await _sync();
+                },
+                icon: const Icon(Icons.check_circle, color: Color(0xFF00E676), size: 18),
+                label: const Text('Approve'),
+              ),
+              if (isSuperAdmin) TextButton.icon(
+                onPressed: () async {
+                  final uid = (wd['uid'] ?? '').toString();
+                  final id = (wd['id'] ?? '').toString();
+                  final amt = _num(wd['amt']);
+                  if (uid.isEmpty || id.isEmpty || amt <= 0) return _msg('Withdrawal record incomplete hai.');
+                  final confirm = await showDialog<bool>(
+                    context: ctx,
+                    builder: (confirmCtx) => AlertDialog(
+                      title: const Text('Reject Withdrawal?'),
+                      content: Text('₹$amt player ke Main Wallet mein refund karna hai?'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(confirmCtx, false), child: const Text('Cancel')),
+                        ElevatedButton(onPressed: () => Navigator.pop(confirmCtx, true), child: const Text('Reject & Refund')),
+                      ],
+                    ),
+                  );
+                  if (confirm != true) return;
+                  final now = DateTime.now();
+                  final refundTxnId = 'refund_$id';
+                  final patch = <String, dynamic>{
+                    'withdrawals/$id/status': 'REJECTED',
+                    'withdrawals/$id/rejectedAt': now.millisecondsSinceEpoch,
+                    'withdrawals/$id/processedBy': widget.uid,
+                  };
+                  if (wd['walletDebited'] == true) {
+                    final walletRes = await http.get(Uri.parse('$kDbUrl/users/$uid/wallet.json?auth=\${widget.token}'));
+                    if (walletRes.statusCode != 200) return _msg('Player wallet read nahi hua; refund nahi kiya.');
+                    final balance = _num(jsonDecode(walletRes.body));
+                    patch['users/$uid/wallet'] = balance + amt;
+                    patch['users/$uid/txns/$refundTxnId'] = {
+                      'title': 'Withdrawal Refund',
+                      'sub': 'Rejected withdrawal • \${wd['upi']}',
+                      'amt': amt,
+                      'status': 'REFUNDED',
+                      'createdAt': now.millisecondsSinceEpoch,
+                    };
+                  }
+                  final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=\${widget.token}'), body: jsonEncode(patch));
+                  if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Reject/refund fail hui (HTTP \${res.statusCode}).');
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  _msg(wd['walletDebited'] == true ? 'Withdrawal rejected; ₹$amt Main Wallet mein refund ho gaye.' : 'Old request rejected; pehle deduction nahi hui thi, isliye refund nahi chahiye tha.');
+                  await _sync();
+                },
+                icon: const Icon(Icons.cancel, color: Colors.redAccent, size: 18),
+                label: const Text('Reject'),
+              ),
+            ]),
+          ]),
+        ));
       })),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
     ));
@@ -3196,24 +3276,39 @@ class _HomeScreenState extends State<HomeScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
             onPressed: () async {
               final v = _num(amtC.text.trim());
-              if (!upiC.text.contains('@') || (v - 50).isNegative || (_wallet - v).isNegative) {
-                return _msg('Valid UPI aur balance check karein!');
-              }
+              final upi = upiC.text.trim();
+              if (!upi.contains('@') || v < 50) return _msg('Valid UPI aur minimum ₹50 amount dalein!');
+              final balanceRes = await http.get(Uri.parse('$kDbUrl/users/${widget.uid}/wallet.json?auth=${widget.token}')).timeout(const Duration(seconds: 15));
+              if (balanceRes.statusCode != 200) return _msg('Wallet balance check nahi ho saka. Dobara try karein.');
+              final currentBalance = _num(jsonDecode(balanceRes.body));
+              if (v > currentBalance) return _msg('Wallet mein itna balance nahi hai!');
               final requestId = DateTime.now().microsecondsSinceEpoch.toString();
-              Navigator.pop(ctx);
-              final res = await http.put(
-                Uri.parse('$kDbUrl/withdrawals/$requestId.json?auth=${widget.token}'),
-                body: jsonEncode({
+              final now = DateTime.now().millisecondsSinceEpoch;
+              final patch = <String, dynamic>{
+                'users/${widget.uid}/wallet': currentBalance - v,
+                'users/${widget.uid}/txns/$requestId': {
+                  'title': 'UPI Withdrawal Request',
+                  'sub': '$upi • Pending approval',
+                  'amt': v,
+                  'status': 'DEBITED',
+                  'createdAt': now,
+                },
+                'withdrawals/$requestId': {
                   'uid': widget.uid,
                   'ign': _ign,
-                  'upi': upiC.text.trim(),
+                  'upi': upi,
                   'amt': v,
                   'status': 'PENDING',
-                  'createdAt': DateTime.now().millisecondsSinceEpoch,
-                }),
-              );
-              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Withdrawal request save nahi hui.');
-              _msg('Withdrawal request bhej di. Wallet deduction Super Admin approval par hoga.');
+                  'walletDebited': true,
+                  'txnId': requestId,
+                  'createdAt': now,
+                },
+              };
+              final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch)).timeout(const Duration(seconds: 20));
+              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Withdrawal request save/deduction fail hui (HTTP ${res.statusCode}). Wallet dobara sync karein.');
+              if (mounted) setState(() => _wallet = currentBalance - v);
+              if (ctx.mounted) Navigator.pop(ctx);
+              _msg('₹$v wallet se deduct ho gaye. Withdrawal Pending hai.');
             },
             child: const Text('Withdraw', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
