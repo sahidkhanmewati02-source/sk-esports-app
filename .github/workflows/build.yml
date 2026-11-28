@@ -17,11 +17,98 @@ jobs:
 
       - run: flutter create . --platforms=android
 
+      - name: Configure permanent release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          required = ["KEYSTORE_BASE64", "KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD"]
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit("Missing GitHub Actions secrets: " + ", ".join(missing))
+          data = base64.b64decode(os.environ["KEYSTORE_BASE64"], validate=True)
+          if not data:
+              raise SystemExit("Decoded keystore is empty")
+          with open("android/app/sk-esports-release.jks", "wb") as f:
+              f.write(data)
+          with open("android/key.properties", "w", encoding="utf-8") as f:
+              f.write("storePassword=" + os.environ["KEYSTORE_PASSWORD"] + "\\n")
+              f.write("keyPassword=" + os.environ["KEY_PASSWORD"] + "\\n")
+              f.write("keyAlias=" + os.environ["KEY_ALIAS"] + "\\n")
+              f.write("storeFile=sk-esports-release.jks\\n")
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
+          gradle = next((p for p in candidates if p.exists()), None)
+          if gradle is None:
+              raise SystemExit("Flutter app Gradle file not found")
+          s = gradle.read_text(encoding="utf-8")
+          if gradle.suffix == ".kts":
+              imports = "import java.util.Properties\nimport java.io.FileInputStream\n"
+              if "import java.util.Properties" not in s:
+                  s = imports + s
+              marker = "android {"
+              props = """val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          """
+              if "val keystoreProperties = Properties()" not in s:
+                  s = s.replace(marker, props + marker, 1)
+              signing = """    signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+
+          """
+              if 'create("release")' not in s:
+                  s = s.replace("    buildTypes {", signing + "    buildTypes {", 1)
+              s = s.replace('signingConfig = signingConfigs.getByName("debug")',
+                            'signingConfig = signingConfigs.getByName("release")')
+          else:
+              props = """def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
+          """
+              if "def keystoreProperties = new Properties()" not in s:
+                  s = s.replace("android {", props + "android {", 1)
+              signing = """    signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+
+          """
+              if "release {" not in s[s.find("signingConfigs"):s.find("buildTypes")] if "signingConfigs" in s and "buildTypes" in s else True:
+                  s = s.replace("    buildTypes {", signing + "    buildTypes {", 1)
+              s = s.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+          if "signingConfigs" not in s or "signingConfigs.release" not in s and 'getByName("release")' not in s:
+              raise SystemExit("Could not safely configure release signing")
+          gradle.write_text(s, encoding="utf-8")
+          print("Permanent release signing configured in", gradle)
+          PY
+
       - name: Generate SK ESPORTS launcher icons
         run: |
           sudo apt-get update
           sudo apt-get install -y imagemagick
-          mkdir -p /tmp/sk-icon
           for spec in "mipmap-mdpi 48" "mipmap-hdpi 72" "mipmap-xhdpi 96" "mipmap-xxhdpi 144" "mipmap-xxxhdpi 192"; do
             set -- $spec
             dir="android/app/src/main/res/$1"
@@ -46,12 +133,9 @@ jobs:
           s = open(p, encoding="utf-8").read()
           permission = '<uses-permission android:name="android.permission.INTERNET"/>'
           if permission not in s:
-              s = s.replace("<application", permission + "\n    <application", 1)
+              s = s.replace("<application", permission + "\\n    <application", 1)
           open(p, "w", encoding="utf-8").write(s)
           PY
-
-      # Release uses Flutter's generated default signing config.
-      # No keystore secrets are required. Google Sign-In is intentionally removed.
 
       - run: flutter pub get
       - run: flutter --version
