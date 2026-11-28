@@ -1793,22 +1793,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _editMatchTiming(Map m) {
     final now = DateTime.now();
-    final start = DateTime.fromMillisecondsSinceEpoch(_num(m['startAt']) > 0 ? _num(m['startAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch);
-    final room = DateTime.fromMillisecondsSinceEpoch(_num(m['roomReleaseAt']) > 0 ? _num(m['roomReleaseAt']) : now.add(const Duration(minutes: 45)).millisecondsSinceEpoch);
-    final startC = TextEditingController(text: _dateTimeInput(start));
-    final roomC = TextEditingController(text: _dateTimeInput(room));
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Edit Match Date & Time'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      TextField(controller: startC, readOnly: true, onTap: () => _pickDateTime(startC), decoration: const InputDecoration(labelText: 'Match Date & Time', suffixIcon: Icon(Icons.calendar_month))),
-      const SizedBox(height: 8),
-      const Text('Registration auto-close isi selected match date & time par hoga.', style: TextStyle(fontSize: 11, color: Colors.amber)),
-      TextField(controller: roomC, readOnly: true, onTap: () => _pickDateTime(roomC), decoration: const InputDecoration(labelText: 'Room ID Release Date & Time', suffixIcon: Icon(Icons.schedule))),
-    ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), ElevatedButton(onPressed: () async {
-      final st = DateTime.tryParse(startC.text.trim().replaceFirst(' ', 'T')), rm = DateTime.tryParse(roomC.text.trim().replaceFirst(' ', 'T'));
-      if (st == null || rm == null) return _msg('Date/time select karein.');
-      final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': st.millisecondsSinceEpoch, 'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds, 'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch})};
-      final res = await http.patch(Uri.parse('$kDbUrl/matches/' + m['id'].toString() + '.json?auth=' + widget.token), body: jsonEncode(data));
-      if (res.statusCode >= 200 && res.statusCode < 300) { m.addAll(data); if (mounted) setState(() => _sortMatches()); Navigator.pop(ctx); _msg('Match date/time aur auto-close update ho gaya.'); } else { _msg('Timer save nahi hua. Firebase Rules check karein.'); }
-    }, child: const Text('Save Timer'))]));
+    final startMs = _num(m['startAt']) > 0 ? _num(m['startAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch;
+    final closeMs = _num(m['closeAt']) > 0 ? _num(m['closeAt']) : startMs;
+    final startC = TextEditingController(text: _dateTimeInput(DateTime.fromMillisecondsSinceEpoch(startMs)));
+    final closeC = TextEditingController(text: _dateTimeInput(DateTime.fromMillisecondsSinceEpoch(closeMs)));
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Edit Match Timing'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: startC, readOnly: true, onTap: () => _pickDateTime(startC), decoration: const InputDecoration(labelText: 'Match Start Date & Time', suffixIcon: Icon(Icons.calendar_month))),
+        const SizedBox(height: 10),
+        TextField(controller: closeC, readOnly: true, onTap: () => _pickDateTime(closeC), decoration: const InputDecoration(labelText: 'Registration End / Close Time', suffixIcon: Icon(Icons.event_busy))),
+        const SizedBox(height: 8),
+        const Text('Registration close time alag se badha sakte hain. Room release start time se 15 minute pehle rahega.', style: TextStyle(fontSize: 11, color: Colors.amber)),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () async {
+          final st = DateTime.tryParse(startC.text.trim().replaceFirst(' ', 'T'));
+          final cl = DateTime.tryParse(closeC.text.trim().replaceFirst(' ', 'T'));
+          if (st == null || cl == null) return _msg('Dono date/time select karein.');
+          if (cl.isAfter(st)) return _msg('Registration close time match start se aage nahi ho sakta.');
+          final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': cl.millisecondsSinceEpoch, 'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds, 'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch})};
+          final res = await http.patch(Uri.parse('$kDbUrl/matches/' + m['id'].toString() + '.json?auth=' + widget.token), body: jsonEncode(data));
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            m.addAll(data);
+            if (mounted) setState(() => _sortMatches());
+            Navigator.pop(ctx);
+            _msg('Match start aur registration close time update ho gaya.');
+          } else {
+            _msg('Timing save nahi hui (HTTP ${res.statusCode}). Firebase rules check karein.');
+          }
+        }, child: const Text('Save Timing')),
+      ],
+    ));
   }
   Future<void> _toggleMatchHold(Map m) async {
     final hold = m['hold'] != true;
@@ -3104,13 +3121,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9800)),
             onPressed: () async {
-              setState(() {
-                m['rId'] = idC.text.trim();
-                m['rPass'] = passC.text.trim();
-              });
-              Navigator.pop(ctx);
-              await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'rId': m['rId'], 'rPass': m['rPass']}));
-              _msg('Room Updated!');
+              final roomId = idC.text.trim(), roomPass = passC.text.trim();
+              final res = await http.patch(Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'), body: jsonEncode({'rId': roomId, 'rPass': roomPass}));
+              if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Room save nahi hua (HTTP ${res.statusCode}).');
+              if (mounted) setState(() { m['rId'] = roomId; m['rPass'] = roomPass; });
+              if (ctx.mounted) Navigator.pop(ctx);
+              _msg('Room ID & Password updated!');
             },
             child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
@@ -3484,6 +3500,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         onPressed: () => _showPlayers(m),
                         style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), minimumSize: Size.zero),
                         child: const Text('Players', style: TextStyle(color: Color(0xFFFF9800), fontSize: 12)),
+                      ),
+                      if (_can('matches_manage')) OutlinedButton.icon(
+                        onPressed: () => _editRoom(m),
+                        icon: const Icon(Icons.vpn_key, size: 14),
+                        label: const Text('Room ID / Pass', style: TextStyle(fontSize: 11)),
+                      ),
+                      if (_can('matches_manage')) OutlinedButton.icon(
+                        onPressed: () => _editMatchTiming(m),
+                        icon: const Icon(Icons.edit_calendar, size: 14),
+                        label: const Text('Edit End Time', style: TextStyle(fontSize: 11)),
+                      ),
+                      if (_can('matches_manage')) OutlinedButton.icon(
+                        onPressed: () => _toggleMatchHold(m),
+                        icon: Icon(m['hold'] == true ? Icons.play_arrow : Icons.pause, size: 14),
+                        label: Text(m['hold'] == true ? 'Resume Match' : 'Hold Match', style: const TextStyle(fontSize: 11)),
                       ),
                       if (_can('voting_manage')) OutlinedButton.icon(
                         onPressed: () => _configureMatchVotingAdmins(m),
