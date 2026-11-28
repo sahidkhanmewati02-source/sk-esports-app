@@ -1792,38 +1792,62 @@ class _HomeScreenState extends State<HomeScreen> {
   String _timeLabel(dynamic raw) { final ms = _num(raw); if (ms <= 0) return 'Not set'; final d = DateTime.fromMillisecondsSinceEpoch(ms); return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}'; }
 
   void _editMatchTiming(Map m) {
+    // This control edits the actual match end time. Registration closeAt is
+    // intentionally kept separate so extending a match never reopens/changes registration.
     final now = DateTime.now();
-    final startMs = _num(m['startAt']) > 0 ? _num(m['startAt']) : now.add(const Duration(hours: 1)).millisecondsSinceEpoch;
-    final closeMs = _num(m['closeAt']) > 0 ? _num(m['closeAt']) : startMs;
-    final startC = TextEditingController(text: _dateTimeInput(DateTime.fromMillisecondsSinceEpoch(startMs)));
-    final closeC = TextEditingController(text: _dateTimeInput(DateTime.fromMillisecondsSinceEpoch(closeMs)));
+    final startMs = _num(m['startAt']) > 0
+        ? _num(m['startAt'])
+        : now.add(const Duration(hours: 1)).millisecondsSinceEpoch;
+    final savedEndMs = _num(m['endAt']);
+    final defaultEndMs = savedEndMs > startMs
+        ? savedEndMs
+        : startMs + const Duration(hours: 2).inMilliseconds;
+    final endC = TextEditingController(
+      text: _dateTimeInput(DateTime.fromMillisecondsSinceEpoch(defaultEndMs)),
+    );
     showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Edit Match Timing'),
-      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: startC, readOnly: true, onTap: () => _pickDateTime(startC), decoration: const InputDecoration(labelText: 'Match Start Date & Time', suffixIcon: Icon(Icons.calendar_month))),
-        const SizedBox(height: 10),
-        TextField(controller: closeC, readOnly: true, onTap: () => _pickDateTime(closeC), decoration: const InputDecoration(labelText: 'Registration End / Close Time', suffixIcon: Icon(Icons.event_busy))),
+      title: const Text('Edit Match End Time'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Match Start: ${_dateTimeInput(DateTime.fromMillisecondsSinceEpoch(startMs))}',
+          style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        const SizedBox(height: 12),
+        TextField(
+          controller: endC,
+          readOnly: true,
+          onTap: () => _pickDateTime(endC),
+          decoration: const InputDecoration(
+            labelText: 'New Match End Date & Time',
+            suffixIcon: Icon(Icons.event_available),
+          ),
+        ),
         const SizedBox(height: 8),
-        const Text('Registration close time alag se badha sakte hain. Room release start time se 15 minute pehle rahega.', style: TextStyle(fontSize: 11, color: Colors.amber)),
-      ])),
+        const Text(
+          'Yahan sirf match ka end time badlega. Registration close time aur room settings same rahengi.',
+          style: TextStyle(fontSize: 11, color: Colors.amber),
+        ),
+      ]),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         ElevatedButton(onPressed: () async {
-          final st = DateTime.tryParse(startC.text.trim().replaceFirst(' ', 'T'));
-          final cl = DateTime.tryParse(closeC.text.trim().replaceFirst(' ', 'T'));
-          if (st == null || cl == null) return _msg('Dono date/time select karein.');
-          if (cl.isAfter(st)) return _msg('Registration close time match start se aage nahi ho sakta.');
-          final data = {'startAt': st.millisecondsSinceEpoch, 'closeAt': cl.millisecondsSinceEpoch, 'roomReleaseAt': st.millisecondsSinceEpoch - const Duration(minutes: 15).inMilliseconds, 'time': _smartMatchTime({'startAt': st.millisecondsSinceEpoch})};
-          final res = await http.patch(Uri.parse('$kDbUrl/matches/' + m['id'].toString() + '.json?auth=' + widget.token), body: jsonEncode(data));
+          final end = DateTime.tryParse(endC.text.trim().replaceFirst(' ', 'T'));
+          if (end == null) return _msg('Valid end date/time select karein.');
+          if (!end.isAfter(DateTime.fromMillisecondsSinceEpoch(startMs))) {
+            return _msg('Match end time, match start time ke baad hona chahiye.');
+          }
+          final data = {'endAt': end.millisecondsSinceEpoch};
+          final res = await http.patch(
+            Uri.parse('$kDbUrl/matches/${m['id']}.json?auth=${widget.token}'),
+            body: jsonEncode(data),
+          );
           if (res.statusCode >= 200 && res.statusCode < 300) {
             m.addAll(data);
             if (mounted) setState(() => _sortMatches());
             Navigator.pop(ctx);
-            _msg('Match start aur registration close time update ho gaya.');
+            _msg('Match end time successfully update ho gaya.');
           } else {
-            _msg('Timing save nahi hui (HTTP ${res.statusCode}). Firebase rules check karein.');
+            _msg('End time save nahi hua (HTTP ${res.statusCode}). Firebase rules check karein.');
           }
-        }, child: const Text('Save Timing')),
+        }, child: const Text('Save End Time')),
       ],
     ));
   }
