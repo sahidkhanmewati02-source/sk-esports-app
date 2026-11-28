@@ -1171,11 +1171,75 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _matchExpenses(Map h){final e=h['expenses'];if(e is Map)return e.values.whereType<Map>().fold<int>(0,(n,x)=>n+_num(x['amount']));return 0;}
 
-  Future<void> _addMatchExpense(Map m) async {
-    if(!isSuperAdmin)return;
-    final a=TextEditingController(),n=TextEditingController(),p=TextEditingController();
-    await showDialog<void>(context:context,builder:(ctx)=>AlertDialog(title:Text('Expense • '+(m['title']??'Match').toString()),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:a,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Amount ₹')),TextField(controller:n,decoration:const InputDecoration(labelText:'Reason')),TextField(controller:p,decoration:const InputDecoration(labelText:'UTR / Proof'))]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancel')),ElevatedButton(onPressed:() async{final amount=_num(a.text),reason=n.text.trim();if(amount<=0||reason.isEmpty)return _msg('Amount and reason required.');final id=m['id'].toString(),h=await _readMatchHisaab(id,(m['title']??'Match').toString());if(h['settled']==true)return _msg('Match settled hai.');final r=await http.post(Uri.parse('$kDbUrl/match_hisaab/$id/expenses.json?auth=${widget.token}'),body:jsonEncode({'amount':amount,'note':reason,'proof':p.text.trim(),'createdAt':DateTime.now().millisecondsSinceEpoch}));if(r.statusCode<200||r.statusCode>=300)return _msg('Expense save failed.');if(ctx.mounted)Navigator.pop(ctx);await _sync();},child:const Text('Save Expense'))]));
-    a.dispose();n.dispose();p.dispose();
+  Future<bool> _addMatchExpense(Map m) async {
+    if (!isSuperAdmin) {
+      _msg('Only Super Admin can add match expenses.');
+      return false;
+    }
+    final amountController = TextEditingController();
+    final reasonController = TextEditingController();
+    final proofController = TextEditingController();
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Add Expense • ${m['title'] ?? 'Match'}'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: amountController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount ₹')),
+              TextField(controller: reasonController, decoration: const InputDecoration(labelText: 'Reason / Description')),
+              TextField(controller: proofController, decoration: const InputDecoration(labelText: 'UTR / Proof (optional)')),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                final amount = _num(amountController.text);
+                final reason = reasonController.text.trim();
+                if (amount <= 0 || reason.isEmpty) {
+                  _msg('Amount and reason required.');
+                  return;
+                }
+                try {
+                  final id = (m['id'] ?? '').toString();
+                  if (id.isEmpty) throw Exception('Match ID missing.');
+                  final current = await _readMatchHisaab(id, (m['title'] ?? 'Match').toString());
+                  if (current['settled'] == true) throw Exception('Match already settled hai.');
+                  final response = await http.post(
+                    Uri.parse('$kDbUrl/match_hisaab/$id/expenses.json?auth=${widget.token}'),
+                    body: jsonEncode({
+                      'amount': amount,
+                      'note': reason,
+                      'proof': proofController.text.trim(),
+                      'createdAt': DateTime.now().millisecondsSinceEpoch,
+                      'createdBy': widget.uid,
+                    }),
+                  ).timeout(const Duration(seconds: 20));
+                  if (response.statusCode < 200 || response.statusCode >= 300) {
+                    throw Exception('Expense save failed (HTTP ${response.statusCode}): ${response.body}');
+                  }
+                  if (ctx.mounted) Navigator.pop(ctx, true);
+                } catch (e) {
+                  _msg(e.toString().replaceFirst('Exception: ', ''));
+                }
+              },
+              child: const Text('Save Expense'),
+            ),
+          ],
+        ),
+      );
+      if (saved == true) {
+        await _sync();
+        _msg('Expense successfully added to this match.');
+        return true;
+      }
+      return false;
+    } finally {
+      amountController.dispose();
+      reasonController.dispose();
+      proofController.dispose();
+    }
   }
 
   Future<void> _payAdminShare(Map m,Map<String,dynamic> admin) async {
@@ -1433,7 +1497,26 @@ class _HomeScreenState extends State<HomeScreen> {
                   )),
                 ],
               ]),
-              actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close'))],
+              actions: [
+                if (isSuperAdmin)
+                  TextButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(dialogContext);
+                      final saved = await _addMatchExpense(match);
+                      if (saved && pageContext.mounted) {
+                        try {
+                          final latest = await _readMatchHisaab(id, title);
+                          await showFinanceHisaab(pageContext, <String,dynamic>{...account, ...latest, 'id': id, 'title': title, 'match': match});
+                        } catch (e) {
+                          _msg('Expense saved, but Hisaab refresh failed: ${e.toString()}');
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('Add Expense'),
+                  ),
+                TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
+              ],
             );
           },
         ),
