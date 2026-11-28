@@ -1772,8 +1772,19 @@ class _HomeScreenState extends State<HomeScreen> {
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const weekdays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
     final day = diff == 0 ? 'Today' : (diff == 1 ? 'Tomorrow' : '${weekdays[d.weekday - 1]}, ${d.day}');
-    final hour = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    return '$day, ${d.day} ${months[d.month - 1]} • ${hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')} ${d.hour >= 12 ? 'PM' : 'AM'}';
+    String clock(DateTime value) {
+      final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+      return '${hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')} ${value.hour >= 12 ? 'PM' : 'AM'}';
+    }
+    final endMs = _num(m['endAt']);
+    if (endMs > ms) {
+      final end = DateTime.fromMillisecondsSinceEpoch(endMs);
+      final endLabel = DateTime(end.year, end.month, end.day) == date
+          ? 'End ${clock(end)}'
+          : 'End ${end.day} ${months[end.month - 1]} • ${clock(end)}';
+      return '$day, ${d.day} ${months[d.month - 1]} • Start ${clock(d)} • $endLabel';
+    }
+    return '$day, ${d.day} ${months[d.month - 1]} • ${clock(d)}';
   }
 
   bool _matchClosed(Map m) { final c = _num(m['closeAt']); return m['status'] == 'CLOSED' || (c > 0 && _clock.millisecondsSinceEpoch >= c); }
