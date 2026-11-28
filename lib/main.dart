@@ -2041,7 +2041,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   final res = await http.patch(Uri.parse('$kDbUrl/.json?auth=${widget.token}'), body: jsonEncode(patch));
                   if (res.statusCode < 200 || res.statusCode >= 300) return _msg('Approval fail hui (HTTP ${res.statusCode}).');
                   if (ctx.mounted) Navigator.pop(ctx);
-                  _msg('Withdrawal Success! Wallet se dobara deduction nahi hui.');
+                  _msg('Payment Successful! ₹$amt withdrawal paid/approved. Wallet se dobara deduction nahi hui.');
                   await _sync();
                 },
                 icon: const Icon(Icons.check_circle, color: Color(0xFF00E676), size: 18),
