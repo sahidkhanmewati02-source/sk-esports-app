@@ -141,6 +141,22 @@ jobs:
       - run: flutter --version
       - run: flutter build apk --release
 
+      - name: Verify APK is signed with the permanent keystore
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          APK_SHA="$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/.*SHA-256 digest: //p' | head -n 1 | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
+          KEY_SHA="$(keytool -exportcert -keystore android/app/sk-esports-release.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | sha256sum | awk '{print toupper($1)}')"
+          if [ -z "$APK_SHA" ] || [ "$APK_SHA" != "$KEY_SHA" ]; then
+            echo "APK signing certificate does not match the configured permanent keystore."
+            exit 1
+          fi
+          echo "APK signature verified against the permanent keystore."
+
       - uses: actions/upload-artifact@v4
         with:
           name: SK-ESPORTS-App
